@@ -9,7 +9,7 @@ from config_file import config
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, StandardScaler
 
@@ -356,103 +356,6 @@ def preprocessor(is_scale: bool = config.scaling.is_scale, is_cat: bool = True) 
     )
 
     return pipeline
-
-
-def logistic_kfold(
-    X_train: pd.DataFrame,
-    y_train: pd.Series,
-    penalty: str | None = None,
-    C: float | None = None,
-    l1_ratio: float | None = None,
-    solver: str | None = None,
-    tol: float | None = None,
-    fit_intercept: bool | None = None,
-    random_state: int | None = None,
-    max_iter: int | None = None,
-    verbose: int | None = None,
-    n_splits: int | None = None,
-) -> dict[str, Any]:
-    """
-    Выполняет кросс-валидацию логистической регрессии с предобработкой данных.
-
-    Args:
-        X_train: Обучающие признаки
-        y_train: Целевая переменная
-        penalty: Тип регуляризации ('l1', 'l2', 'elasticnet', None)
-        C: Параметр регуляризации (обратная сила регуляризации)
-        l1_ratio: Коэффициент смешивания для elasticnet
-        solver: Алгоритм оптимизации
-        tol: Толерантность остановки
-        fit_intercept: Добавлять ли свободный член
-        random_state: Seed для воспроизводимости
-        max_iter: Максимальное количество итераций
-        verbose: Уровень детализации
-        n_splits: Количество фолдов для кросс-валидации
-
-    Returns:
-        Dict[str, Any]: Словарь с результатами, содержащий:
-            - model: Обученная модель
-            - fold_scores: Массив оценок по фолдам
-            - mean_score: Средняя точность
-            - std_score: Стандартное отклонение точности
-            - params: Параметры модели
-    """
-    penalty = penalty if penalty is not None else config.linear_model.penalty
-    C = C if C is not None else config.linear_model.C
-    l1_ratio = l1_ratio if l1_ratio is not None else config.linear_model.l1_ratio
-    solver = solver if solver is not None else config.linear_model.solver
-    tol = tol if tol is not None else config.linear_model.tol
-    fit_intercept = (
-        fit_intercept if fit_intercept is not None else config.linear_model.bias
-    )
-    random_state = (
-        random_state if random_state is not None else config.determenism.random_state
-    )
-    max_iter = max_iter if max_iter is not None else config.linear_model.max_iter
-    verbose = verbose if verbose is not None else config.linear_model.verbose
-    n_splits = n_splits if n_splits is not None else config.cv.n_splits
-
-    skf = StratifiedKFold(
-        n_splits=n_splits, random_state=random_state, shuffle=config.determenism.shuffle
-    )
-
-    model = LogisticRegression(
-        penalty=penalty,
-        C=C,
-        l1_ratio=l1_ratio,
-        solver=solver,
-        tol=tol,
-        fit_intercept=fit_intercept,
-        random_state=random_state,
-        max_iter=max_iter,
-        verbose=verbose,
-    )
-
-    pipeline = Pipeline([
-        ("preprocessor", preprocessor()), 
-        ("model", model)])
-
-    scores = cross_val_score(pipeline, X_train, y_train, cv=skf, scoring="accuracy")
-
-    for fold, acc in enumerate(scores, start=1):
-        if config.logs.console:
-            print(f"fold-{fold} accuracy: {acc}")
-
-    if config.logs.console:
-        print(f"Mean Accuracy: {np.mean(scores)}")
-
-    pipeline.fit(X_train, y_train)
-
-    model = pipeline.named_steps["model"]
-
-    return {
-        "model": model,
-        "fold_scores": scores,
-        "mean_score": np.mean(scores),
-        "std_score": np.std(scores),
-        "params": model.get_params(),
-    }
-
 
 def model_return(
     model: LogisticRegression, 

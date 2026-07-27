@@ -207,4 +207,4 @@ def log_reg_cv(
     print(f"test accuracy: {test_acc}")
 
     res = pipeline_return(pipeline_cv, best_cv_score)
-    add_result( res)
+    add_result(res) 
