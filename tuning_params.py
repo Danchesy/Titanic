@@ -1,3 +1,7 @@
+import os
+import time
+
+import joblib
 import numpy as np
 import optuna
 from config_file import config
@@ -16,6 +20,9 @@ def grid_tuning(model,
                 y_test,
                 is_scale = True,
                 is_cat = True):
+
+    os.makedirs('models', exist_ok=True)
+
     pipeline = Pipeline([
         ('preprocessor', preprocessor(is_scale=is_scale, is_cat=is_cat)),
         ('model', model)
@@ -29,19 +36,40 @@ def grid_tuning(model,
                     pre_dispatch='2*n_jobs',  
                     return_train_score=False)
 
+    start_train = time.time()
     grid_search.fit(X_train, y_train)
+    train_time = time.time() - start_train
 
     print(f"Best parameters: {grid_search.best_params_}")
     print(f"Best CV Accuracy: {grid_search.best_score_:.4f}")
+    print(f"GridSearch trainig time: {train_time:.2f} s.")
 
     best_pipeline = grid_search.best_estimator_
+
+    start_predict = time.time()
     test_preds = best_pipeline.predict(X_test)
+    predict_time = time.time() - start_predict
+
     final_acc = accuracy_score(y_test, test_preds)
 
     print(f"X_test Accuracy: {final_acc:.4f}")
+    print(f"X_test time predict ({len(X_test)} lines): {predict_time:.4f} s.")
+    print(f"Latency: {(predict_time / len(X_test)) * 1000:.4f} ms")
 
-    res = pipeline_return(best_pipeline, grid_search.best_score_)
+    res = pipeline_return(
+        best_pipeline,
+        grid_search.best_score_,
+        tuning_time=train_time,
+        predict_time=predict_time,
+        n_samples=len(X_test),
+    )
     add_result(res)
+
+
+    model_name = model.__class__.__name__
+    filename = f"models/{model_name}_grid_acc_{grid_search.best_score_:.4f}.pkl"
+    joblib.dump(best_pipeline, filename)
+    print(f"Pipeline saved as: {filename}")
 
     return grid_search
 
@@ -56,6 +84,8 @@ def optuna_tuning(model,
                   n_trials = 20,
                   is_scale = config.scaling.is_scale,
                   is_cat = config.is_cat):
+
+    os.makedirs('models', exist_ok=True)
 
     def objective(trial):
         params = params_fn(trial)
@@ -76,13 +106,17 @@ def optuna_tuning(model,
         return accuracy
 
 
+    start_optuna = time.time()
     study = optuna.create_study(direction=direction)
     study.optimize(objective, n_trials=n_trials)
+    optuna_time = time.time() - start_optuna
 
     best_params = study.best_params
     if config.logs.console:
         print(f"Best CV Accuracy: {study.best_value:.4f}")
         print(f"Best parameters: {best_params}")
+        print(f"Optuna optimization time ({n_trials} trials): {optuna_time:.2f} s.")
+        print(f"Mean time per trial: {optuna_time / n_trials:.2f} s.")
 
     best_model = clone(model)
     best_model.set_params(**best_params)
@@ -92,16 +126,34 @@ def optuna_tuning(model,
         ('model', best_model)
     ])
 
+    start_train = time.time()
     final_pipeline.fit(X_train, y_train)
+    train_time = time.time() - start_train
 
+    start_predict = time.time()
     pred = final_pipeline.predict(X_test)
+    predict_time = time.time() - start_predict
+
     test_accuracy = accuracy_score(y_test, pred) # Правильный порядок: y_true, y_pred
 
     if config.logs.console:
         print(f"X_test Accuracy: {test_accuracy:.4f}")
+        print(f"Final pipeline's training: {train_time:.4f} s.")
+        print(f"X_test predictions ({len(X_test)} lines): {predict_time:.4f} s.")
 
-    res = pipeline_return(final_pipeline, study.best_value)
+    res = pipeline_return(
+        final_pipeline,
+        study.best_value,
+        tuning_time=optuna_time,
+        predict_time=predict_time,
+        n_samples=len(X_test),
+    )
     add_result(res)
+
+    model_name = model.__class__.__name__
+    filename = f"models/{model_name}_optuna_acc_{study.best_value:.4f}.pkl"
+    joblib.dump(final_pipeline, filename)
+    print(f"Pipeline saved as: {filename}")
 
     return study
 

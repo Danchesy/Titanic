@@ -198,7 +198,7 @@ def log_reg_cv(
 
     test_acc = pipeline_cv.score(X_test, y_test)
 
-    label = list(scores.keys()[0])
+    label = next(iter(scores.keys()))
     mean_cv_per_c = np.mean(scores[label], axis=0)
     best_cv_score = np.max(mean_cv_per_c).item()
 
@@ -207,4 +207,4 @@ def log_reg_cv(
     print(f"test accuracy: {test_acc}")
 
     res = pipeline_return(pipeline_cv, best_cv_score)
-    add_result(res) 
+    add_result(res)

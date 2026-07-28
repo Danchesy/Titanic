@@ -1,6 +1,7 @@
 import json
 from typing import Any
 
+import joblib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -357,6 +358,7 @@ def preprocessor(is_scale: bool = config.scaling.is_scale, is_cat: bool = True) 
 
     return pipeline
 
+
 def model_return(
     model: LogisticRegression, 
     accuracies: float | list[float] | np.ndarray
@@ -384,24 +386,41 @@ def model_return(
 
 def pipeline_return(
     pipeline: Pipeline, 
-    cv_scores: list[float] | np.ndarray
+    cv_scores: list[float] | np.ndarray,
+    tuning_time: float | None = None,
+    predict_time: float | None = None,
+    n_samples: int | None = None,
 ) -> dict[str, Any]:
-    """
-    Формирует словарь с результатами пайплайна.
+    """Формирует словарь с результатами пайплайна, включая метрики времени.
 
     Args:
-        pipeline: Обученный пайплайн
-        cv_scores: Массив оценок кросс-валидации
+        pipeline: Обученный пайплайн cv_scores: Массив оценок кросс-валидации или
+        среднее значение tuning_time: Время подбора параметров (GridSearch /
+        Optuna) в секундах predict_time: Общее время предсказания на тестовой
+        выборке в секундах n_samples: Количество объектов в тестовой выборке для
+        расчета latency
 
     Returns:
-        Dict[str, Any]: Словарь с результатами
+        Dict[str, Any]: Словарь с результатами и временными метриками
     """
-    return {
+    result = {
         "pipeline": pipeline,
         "mean_score": np.mean(cv_scores),
         "std_score": np.std(cv_scores),
         "params": pipeline.named_steps["model"].get_params(),
     }
+
+    if tuning_time is not None:
+        result["tuning_time_sec"] = round(tuning_time, 2)
+
+    if predict_time is not None:
+        result["predict_time_sec"] = round(predict_time, 4)
+        if n_samples and n_samples > 0:
+            # Latency: 1 obj per ms
+            latency_ms = (predict_time / n_samples) * 1000
+            result["latency_ms_per_sample"] = round(latency_ms, 4)
+
+    return result 
 
 
 def add_result(
@@ -435,6 +454,9 @@ def add_result(
         "accuracy": float(output.get("mean_score")),
         "std": float(output.get("std_score")),
         "params": {str(k): str(v) for k, v in raw_params.items()},
+        "tuning_time_sec": output.get("tuning_time_sec"),
+        "predict_time_sec": output.get("predict_time_sec"),
+        "latency_ms_per_sample": output.get("latency_ms_per_sample"),
     }
 
     if results is not None:
@@ -486,3 +508,21 @@ def plot_feature_importance(
     plt.tight_layout()
     plt.show()
 
+
+def generate_submission(
+    pipeline_path="models/full_pipeline.pkl", 
+    output_path="data/submission.csv"
+):
+    pipeline = joblib.load(pipeline_path)
+
+    *_, test = data_loading()
+
+    preds = pipeline.predict(test)
+
+    submission = pd.DataFrame({
+        'PassengerId': test.index,
+        'Survived': preds.astype(int)
+    })
+
+    submission.to_csv(output_path, index=False)
+    print(f"Submit created successfully and saved as {output_path}")

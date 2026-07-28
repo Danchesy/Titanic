@@ -180,11 +180,11 @@ def main():
     print(f"Val: {X_val.shape}")
     print(f"Test: {X_test.shape}")
 
-    run_logistic_experiments(X_all, y_all, X_test, y_val)
-    run_knn_experiments(X_all, y_all, X_test, y_val)
-    run_tree_experiments(X_all, y_all, X_test, y_val)
-    run_boosting_experiments(X_all, y_all, X_test, y_val)
-    # run_dnn_experiments(X_all, y_all, X_test, y_val)
+    run_logistic_experiments(X_train, y_train, X_val, y_val)
+    run_knn_experiments(X_train, y_train, X_val, y_val)
+    run_tree_experiments(X_train, y_train, X_val, y_val)
+    run_boosting_experiments(X_train, y_train, X_val, y_val)
+    run_dnn_experiments(X_train, y_train, X_val, y_val)
 
     print("\nГотово. Результаты в log/experiments.jsonl")
 
