@@ -6,13 +6,31 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from config_file import config
+import wandb
+from omegaconf import OmegaConf
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, StandardScaler
+
+from config_file import config
+
+__all__ = [
+    'FeatureEngineer',
+    'WandbLogger',
+    'add_result',
+    'data_loading',
+    'data_preparation',
+    'data_scaling',
+    'generate_submission',
+    'model_return',
+    'pipeline_return',
+    'plot_feature_importance',
+    'preprocessor',
+    'train_val_test_split',
+]
 
 
 class FeatureEngineer(BaseEstimator, TransformerMixin):
@@ -129,6 +147,88 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         return X
 
 
+class WandbLogger:
+    """Логирование экспериментов в Weights & Biases."""
+
+    def __init__(self, config) -> None:
+        self.enabled = config.logs.wandb.enabled
+
+        if not self.enabled:
+            return
+
+        wandb.init(
+            project=config.logs.wandb.project,
+            entity=config.logs.wandb.entity,
+            tags=config.logs.wandb.tags,
+            config=OmegaConf.to_container(config, resolve=True),
+        )
+
+    def log_experiment(self, experiment: dict[str, Any]) -> None:
+        """Логирует результаты одного эксперимента."""
+
+        if not self.enabled:
+            return
+
+        log_data = {
+            "accuracy": experiment["accuracy"],
+            "std": experiment["std"],
+            "tuning_time_sec": experiment["tuning_time_sec"],
+            "predict_time_sec": experiment["predict_time_sec"],
+            "latency_ms_per_sample": experiment["latency_ms_per_sample"],
+        }
+
+        for key, value in experiment["params"].items():
+            log_data[f"param/{key}"] = value
+
+        wandb.log(log_data)
+
+    def log_feature_importance(self, importance_df) -> None:
+        """Сохраняет feature importance."""
+
+        if not self.enabled:
+            return
+
+        wandb.log(
+            {
+                "feature_importance": wandb.Table(
+                    dataframe=importance_df
+                )
+            }
+        )
+
+    def log_shap(self, image_path: str) -> None:
+        """Сохраняет SHAP-график."""
+
+        if not self.enabled:
+            return
+
+        wandb.log(
+            {
+                "shap_summary": wandb.Image(image_path)
+            }
+        )
+
+    def log_pipeline(self, model_path: str) -> None:
+        """Сохраняет обученную модель."""
+
+        if not self.enabled:
+            return
+
+        artifact = wandb.Artifact(
+            name="best_model",
+            type="model",
+        )
+
+        artifact.add_file(model_path)
+
+        wandb.log_artifact(artifact)
+
+    def finish(self) -> None:
+        """Завершает текущий run."""
+
+        if self.enabled:
+            wandb.finish()
+
 
 def data_loading(
         train_path = config.paths.path_to_train, 
@@ -146,8 +246,8 @@ def data_loading(
     X_train, X_val, y_train, y_val = train_test_split(
         X, y,
         test_size = config.train_test_split.test_size,
-        random_state = config.determenism.random_state,
-        shuffle=config.determenism.shuffle,
+        random_state = config.determinism.random_state,
+        shuffle=config.determinism.shuffle,
         stratify=y
     )
 
@@ -223,8 +323,8 @@ def train_val_test_split(
         X,
         y,
         test_size=config.train_test_split.test_size,
-        random_state=config.determenism.random_state,
-        shuffle=config.determenism.shuffle,
+        random_state=config.determinism.random_state,
+        shuffle=config.determinism.shuffle,
         stratify=y,
     )
 
@@ -232,8 +332,8 @@ def train_val_test_split(
         X_train,
         y_train,
         test_size=config.train_test_split.val_size,
-        random_state=config.determenism.random_state,
-        shuffle=config.determenism.shuffle,
+        random_state=config.determinism.random_state,
+        shuffle=config.determinism.shuffle,
         stratify=y_train,
     )
 
@@ -464,9 +564,12 @@ def add_result(
 
     # Дописываем в файл ('a' — append)
     # JSON Lines (один эксперимент — одна строчка в файле)
-    with open(log_file_path, mode="a", encoding="utf-8") as f:
-        # json.dumps превращает словарь в одну текстовую строку
-        f.write(json.dumps(experiment_data, ensure_ascii=False) + "\n")
+    if config.logs.file:
+        with open(log_file_path, mode="a", encoding="utf-8") as f:
+            # json.dumps превращает словарь в одну текстовую строку
+            f.write(json.dumps(experiment_data, ensure_ascii=False) + "\n")
+    
+    return experiment_data
 
 
 def plot_feature_importance(

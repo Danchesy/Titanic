@@ -5,20 +5,28 @@ from omegaconf import OmegaConf
 BASE_DIR = Path(__file__).resolve().parent
 
 conf = {
-    "logs": {"console": True, "file": False, "wandb": True},
+    "logs": {
+        "console": True, 
+        "file": True, 
+        "wandb": {
+            "enabled": True,
+            "project": "titanic",
+            "entity": None,
+            "tags": ["classification"],
+        }
+    },
     "paths": {
         "path_to_train": BASE_DIR / "data" / "train.csv",
         "path_to_test": BASE_DIR / "data" / "test.csv",
         "experiments_log": BASE_DIR / "log" / "experiments.jsonl",
     },
-    "determenism": {
+    "determinism": {
         "random_state": 42, 
         "shuffle": True},
     "scaling": {
         "is_scale": True,
         "scaler": "StandardScaler",  # StandardScaler, MinMaxScaler
     },
-
     "train_test_split": {
         "test_size": 0.2,
         "is_val_set": False,

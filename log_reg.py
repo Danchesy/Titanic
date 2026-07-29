@@ -1,5 +1,6 @@
 from typing import Any
 
+import joblib
 import numpy as np
 import pandas as pd
 from config_file import config
@@ -23,6 +24,7 @@ def logistic_kfold(
     verbose: int | None = None,
     n_splits: int | None = None,
     shuffle: bool | None = None,
+    logger: Any = None
 ) -> dict[str, Any]:
     """
     Выполняет кросс-валидацию логистической регрессии с предобработкой данных.
@@ -58,12 +60,12 @@ def logistic_kfold(
         fit_intercept if fit_intercept is not None else config.linear_model.bias
     )
     random_state = (
-        random_state if random_state is not None else config.determenism.random_state
+        random_state if random_state is not None else config.determinism.random_state
     )
     max_iter = max_iter if max_iter is not None else config.linear_model.max_iter
     verbose = verbose if verbose is not None else config.linear_model.verbose
     n_splits = n_splits if n_splits is not None else config.cv.n_splits
-    shuffle = shuffle if shuffle is not None else config.determenism.shuffle
+    shuffle = shuffle if shuffle is not None else config.determinism.shuffle
 
     skf = StratifiedKFold(
         n_splits=n_splits, random_state=random_state, shuffle=shuffle
@@ -100,7 +102,18 @@ def logistic_kfold(
         print(f"{model} mean accuracy: {np.mean(scores)}")
 
     res = pipeline_return(pipeline, scores)
-    add_result(res)
+    experiment = add_result(res)
+
+    if logger is not None:
+        logger.log_experiment(experiment)
+
+    model_name = model.__class__.__name__
+    filename = f"models/{model_name}_log_reg_cv_{scores:.4f}.pkl"
+    joblib.dump(pipeline, filename)
+
+    logger.log_pipeline(filename)
+
+    print(f"Pipeline saved as: {filename}")
 
     return {
         "model": model,
@@ -126,6 +139,7 @@ def log_reg_cv(
     Cs: int | list[float] | np.ndarray = None,
     verbose: int | None = None,
     scoring: str | None = None,
+    logger: Any = None
 ) -> dict[str, Any]:
     """
     Выполняет поиск гиперпараметров логистической регрессии с помощью встроенной кросс-валидации.
@@ -161,7 +175,7 @@ def log_reg_cv(
     """
     tol = tol if tol is not None else config.linear_model.tol
     fit_intercept = fit_intercept if fit_intercept is not None else config.linear_model.bias
-    random_state = random_state if random_state is not None else config.determenism.random_state
+    random_state = random_state if random_state is not None else config.determinism.random_state
     max_iter = max_iter if max_iter is not None else config.linear_model.max_iter
     solver = solver if solver is not None else config.linear_model.solver
     cv = cv if cv is not None else config.linear_model.cv
@@ -207,4 +221,15 @@ def log_reg_cv(
     print(f"test accuracy: {test_acc}")
 
     res = pipeline_return(pipeline_cv, best_cv_score)
-    add_result(res)
+    experiment = add_result(res)
+
+    if logger is not None:
+        logger.log_experiment(experiment)
+
+    model_name = model_cv.__class__.__name__
+    filename = f"models/{model_name}_log_reg_cv_{best_cv_score:.4f}.pkl"
+    joblib.dump(pipeline_cv, filename)
+
+    logger.log_pipeline(filename)
+
+    print(f"Pipeline saved as: {filename}")

@@ -1,0 +1,42 @@
+defaults:
+  - model: linear_model
+  - _self_
+
+target_column_name: "Survived"
+is_cat: true
+
+logs:
+  console: true
+  file: false
+  wandb: true
+
+paths:
+  path_to_train: "/data/train.csv"
+  path_to_test: "/data/test.csv"
+  experiments_log: "/log/experiments.jsonl"
+
+determenism:
+  random_state: 42
+  shuffle: true
+
+scaling:
+  is_scale: true
+  scaler: "StandardScaler"
+
+train_test_split:
+  test_size: 0.2
+  is_val_set: false
+  val_size: 0.2
+
+cv:
+  n_splits: 5
+
+solver_mapping:
+  l1: "liblinear"
+  l2: "lbfgs"
+  elasticnet: "saga"
+  "None": "lbfgs"
+
+hydra:
+  job:
+    chdir: false

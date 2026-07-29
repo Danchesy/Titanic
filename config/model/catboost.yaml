@@ -1,0 +1,15 @@
+name: "catboost"
+iterations: 150
+learning_rate: 0.05
+depth: 4
+l2_leaf_reg: 5.0
+bootstrap_type: "Bernoulli"   # стандартный бэггинг строк
+subsample: 0.7                # Доля объектов на дерево
+rsm: 0.7                      # Доля признаков на дерево (colsample_bylevel)
+cat_features:
+  - "Pclass"
+  - "Embarked"
+  - "Fare_cat"
+  - "Initial"
+  - "Male"
+verbose: false

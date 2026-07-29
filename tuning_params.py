@@ -1,15 +1,34 @@
+# tuning_params.py
 import os
 import time
 
 import joblib
 import numpy as np
 import optuna
-from config_file import config
 from sklearn.base import clone
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import GridSearchCV, cross_val_score
 from sklearn.pipeline import Pipeline
-from utils import add_result, pipeline_return, preprocessor
+
+from config_file import config
+from utils import *
+
+__all__ = [
+    "catboost_grid_params",
+    "catboost_optuna_params",
+    "dt_grid_params",
+    "dt_optuna_params",
+    "grid_tuning",
+    "knn_grid_params",
+    "knn_optuna_params",
+    "lgbm_grid_params",
+    "lgbm_optuna_params",
+    "optuna_tuning",
+    "rf_grid_params",
+    "rf_optuna_params",
+    "xgb_grid_params",
+    "xgb_optuna_params"
+]
 
 
 def grid_tuning(model, 
@@ -19,7 +38,8 @@ def grid_tuning(model,
                 X_test, 
                 y_test,
                 is_scale = True,
-                is_cat = True):
+                is_cat = True,
+                logger = None):
 
     os.makedirs('models', exist_ok=True)
 
@@ -63,12 +83,17 @@ def grid_tuning(model,
         predict_time=predict_time,
         n_samples=len(X_test),
     )
-    add_result(res)
+    experiment = add_result(res)
 
+    if logger is not None:
+        logger.log_experiment(experiment)
 
     model_name = model.__class__.__name__
     filename = f"models/{model_name}_grid_acc_{grid_search.best_score_:.4f}.pkl"
     joblib.dump(best_pipeline, filename)
+
+    logger.log_pipeline(filename)
+
     print(f"Pipeline saved as: {filename}")
 
     return grid_search
@@ -83,7 +108,8 @@ def optuna_tuning(model,
                   direction = 'maximize',
                   n_trials = 20,
                   is_scale = config.scaling.is_scale,
-                  is_cat = config.is_cat):
+                  is_cat = config.is_cat,
+                  logger = None):
 
     os.makedirs('models', exist_ok=True)
 
@@ -148,11 +174,18 @@ def optuna_tuning(model,
         predict_time=predict_time,
         n_samples=len(X_test),
     )
-    add_result(res)
+
+    experiment = add_result(res)
+    
+    if logger is not None:
+        logger.log_experiment(experiment)
 
     model_name = model.__class__.__name__
     filename = f"models/{model_name}_optuna_acc_{study.best_value:.4f}.pkl"
     joblib.dump(final_pipeline, filename)
+
+    logger.log_pipeline(filename)
+
     print(f"Pipeline saved as: {filename}")
 
     return study

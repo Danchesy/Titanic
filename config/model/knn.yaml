@@ -1,0 +1,7 @@
+name: "knn"
+n_neighbors: 3
+weights: "uniform"
+algorithm: "auto"
+leaf_size: 2
+p: 2
+metric: "minkowski"

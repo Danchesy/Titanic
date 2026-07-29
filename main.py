@@ -1,50 +1,34 @@
-"""
-Основной скрипт обучения моделей для Titanic.
-Запускает эксперименты, сохраняет результаты в log/experiments.jsonl
-"""
-
+# main.py
 import warnings
 
 import numpy as np
 import pandas as pd
 from catboost import CatBoostClassifier
-from config_file import config
 from lightgbm import LGBMClassifier
-from log_reg import log_reg_cv, logistic_kfold
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
-from tuning_params import (
-    catboost_grid_params,
-    catboost_optuna_params,
-    dt_grid_params,
-    dt_optuna_params,
-    grid_tuning,
-    knn_grid_params,
-    knn_optuna_params,
-    lgbm_grid_params,
-    lgbm_optuna_params,
-    optuna_tuning,
-    rf_grid_params,
-    rf_optuna_params,
-    xgb_grid_params,
-    xgb_optuna_params,
-)
-from utils import data_loading
 from xgboost import XGBClassifier
+
+from config_file import config
+from log_reg import log_reg_cv, logistic_kfold
+from tuning_params import *
+from utils import *
 
 warnings.filterwarnings('ignore')
 
 
-def run_logistic_experiments(X_train, y_train, X_test, y_test):
+logger = WandbLogger(config)
+
+def run_logistic_experiments(X_train, y_train, X_test, y_test, logger):
     """Логистическая регрессия."""
     print("\nЛОГИСТИЧЕСКАЯ РЕГРЕССИЯ")
 
     print("\nБазовый запуск")
-    logistic_kfold(X_train, y_train)
+    logistic_kfold(X_train, y_train, logger=logger)
 
     print("\nLogisticRegressionCV")
-    log_reg_cv(X_train, y_train, X_test, y_test)
+    log_reg_cv(X_train, y_train, X_test, y_test, logger=logger)
 
     print("\nПеребор параметров")
     l1_ratios = np.arange(0.25, 0.76, 0.25)
@@ -68,7 +52,7 @@ def run_logistic_experiments(X_train, y_train, X_test, y_test):
                 )
 
 
-def run_knn_experiments(X_train, y_train, X_test, y_test):
+def run_knn_experiments(X_train, y_train, X_test, y_test, logger):
     """KNN."""
     print("\nKNN")
 
@@ -78,90 +62,96 @@ def run_knn_experiments(X_train, y_train, X_test, y_test):
     grid_tuning(
         model, knn_grid_params,
         X_train, y_train, X_test, y_test,
-        is_scale=True
+        is_scale=True,
+        logger=logger
     )
 
     print("\nOptuna")
     optuna_tuning(
         model, knn_optuna_params,
         X_train, y_train, X_test, y_test,
-        is_scale=True, n_trials=50
+        is_scale=True, n_trials=50,
+        logger=logger
     )
 
 
-def run_tree_experiments(X_train, y_train, X_test, y_test):
+def run_tree_experiments(X_train, y_train, X_test, y_test, logger):
     """Decision Tree и Random Forest."""
     print("\nДЕРЕВЬЯ РЕШЕНИЙ")
 
-    dt = DecisionTreeClassifier(random_state=config.determenism.random_state)
-    rf = RandomForestClassifier(random_state=config.determenism.random_state)
+    dt = DecisionTreeClassifier(random_state=config.determinism.random_state)
+    rf = RandomForestClassifier(random_state=config.determinism.random_state)
 
     print("\nDecision Tree (Grid)")
     grid_tuning(
         dt, dt_grid_params,
         X_train, y_train, X_test, y_test,
-        is_scale=False
+        is_scale=False,
+        logger=logger
     )
 
     print("\nDecision Tree (Optuna)")
     optuna_tuning(
         dt, dt_optuna_params,
         X_train, y_train, X_test, y_test,
-        is_scale=False, n_trials=50
+        is_scale=False, n_trials=50,
+        logger=logger
     )
 
     print("\nRandom Forest (Grid)")
     grid_tuning(
         rf, rf_grid_params,
         X_train, y_train, X_test, y_test,
-        is_scale=False
+        is_scale=False,
+        logger=logger
     )
 
     print("\nRandom Forest (Optuna)")
     optuna_tuning(
         rf, rf_optuna_params,
         X_train, y_train, X_test, y_test,
-        is_scale=False, n_trials=50
+        is_scale=False, n_trials=50,
+        logger=logger
     )
 
 
-def run_boosting_experiments(X_train, y_train, X_test, y_test):
+def run_boosting_experiments(X_train, y_train, X_test, y_test, logger):
     """XGBoost, LightGBM, CatBoost."""
     print("\nБУСТИНГИ")
 
     xgb = XGBClassifier(
-        random_state=config.determenism.random_state,
+        random_state=config.determinism.random_state,
         n_jobs=-1,
         enable_categorical=True
     )
 
     lgbm = LGBMClassifier(
-        random_state=config.determenism.random_state,
+        random_state=config.determinism.random_state,
         n_jobs=-1,
         verbose=-1
     )
 
     cat = CatBoostClassifier(
-        random_seed=config.determenism.random_state,
+        random_seed=config.determinism.random_state,
         verbose=False
     )
 
     params = {'is_scale': False, 'is_cat': False}
 
     print("\nXGBoost")
-    grid_tuning(xgb, xgb_grid_params, X_train, y_train, X_test, y_test, **params)
-    optuna_tuning(xgb, xgb_optuna_params, X_train, y_train, X_test, y_test, **params, n_trials=50)
+    grid_tuning(xgb, xgb_grid_params, X_train, y_train, X_test, y_test, **params, logger=logger)
+    optuna_tuning(xgb, xgb_optuna_params, X_train, y_train, X_test, y_test, **params, n_trials=50, logger=logger)
 
     print("\nLightGBM")
-    grid_tuning(lgbm, lgbm_grid_params, X_train, y_train, X_test, y_test, **params)
-    optuna_tuning(lgbm, lgbm_optuna_params, X_train, y_train, X_test, y_test, **params, n_trials=50)
+    grid_tuning(lgbm, lgbm_grid_params, X_train, y_train, X_test, y_test, **params, logger=logger)
+    optuna_tuning(lgbm, lgbm_optuna_params, X_train, y_train, X_test, y_test, **params, n_trials=50, logger=logger)
 
     print("\nCatBoost")
-    grid_tuning(cat, catboost_grid_params, X_train, y_train, X_test, y_test, **params)
-    optuna_tuning(cat, catboost_optuna_params, X_train, y_train, X_test, y_test, **params, n_trials=50)
+    grid_tuning(cat, catboost_grid_params, X_train, y_train, X_test, y_test, **params, logger=logger)
+    optuna_tuning(cat, catboost_optuna_params, X_train, y_train, X_test, y_test, **params, n_trials=50, logger=logger)
 
 
-def run_dnn_experiments(X_train, y_train, X_test, y_test):
+def run_dnn_experiments(X_train, y_train, X_test, y_test, logger):
     """DNN."""
     print("\nDNN")
     print("Не реализовано")
@@ -180,11 +170,13 @@ def main():
     print(f"Val: {X_val.shape}")
     print(f"Test: {X_test.shape}")
 
-    run_logistic_experiments(X_train, y_train, X_val, y_val)
-    run_knn_experiments(X_train, y_train, X_val, y_val)
-    run_tree_experiments(X_train, y_train, X_val, y_val)
-    run_boosting_experiments(X_train, y_train, X_val, y_val)
-    run_dnn_experiments(X_train, y_train, X_val, y_val)
+    # run_logistic_experiments(X_train, y_train, X_val, y_val, logger=logger)
+    run_knn_experiments(X_train, y_train, X_val, y_val, logger=logger)
+    run_tree_experiments(X_train, y_train, X_val, y_val, logger=logger)
+    run_boosting_experiments(X_train, y_train, X_val, y_val, logger=logger)
+    run_dnn_experiments(X_train, y_train, X_val, y_val, logger=logger)
+
+    logger.finish()
 
     print("\nГотово. Результаты в log/experiments.jsonl")
 

@@ -1,0 +1,13 @@
+name: "linear_model"
+penalty: "l1"
+C: 1.0
+l1_ratio: 0.0
+max_iter: 100
+solver: "${solver_mapping.${model.penalty}}" 
+tol: 1e-4
+bias: true
+verbose: 0
+cv: 5
+refit: true
+Cs: 10
+scoring: "accuracy"
