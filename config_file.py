@@ -97,8 +97,13 @@ conf = {
         "max_samples": None,
         "monotonic_cst": None,
     },
+    "tuning": {
+        "n_trials": 50,
+        "timeout": 3600,  # секунд
+        "n_jobs": -1
+    },
     "target_column_name": "Survived",
-    "is_cat": True
+    "is_cat": True,
 }
 
 config = OmegaConf.create(conf)

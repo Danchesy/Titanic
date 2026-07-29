@@ -70,7 +70,7 @@ def run_knn_experiments(X_train, y_train, X_test, y_test, logger):
     optuna_tuning(
         model, knn_optuna_params,
         X_train, y_train, X_test, y_test,
-        is_scale=True, n_trials=50,
+        is_scale=True, n_trials=config.tuning.n_trials,
         logger=logger
     )
 
@@ -94,7 +94,7 @@ def run_tree_experiments(X_train, y_train, X_test, y_test, logger):
     optuna_tuning(
         dt, dt_optuna_params,
         X_train, y_train, X_test, y_test,
-        is_scale=False, n_trials=50,
+        is_scale=False, n_trials=config.tuning.n_trials,
         logger=logger
     )
 
@@ -110,7 +110,7 @@ def run_tree_experiments(X_train, y_train, X_test, y_test, logger):
     optuna_tuning(
         rf, rf_optuna_params,
         X_train, y_train, X_test, y_test,
-        is_scale=False, n_trials=50,
+        is_scale=False, n_trials=config.tuning.n_trials,
         logger=logger
     )
 
@@ -121,14 +121,14 @@ def run_boosting_experiments(X_train, y_train, X_test, y_test, logger):
 
     xgb = XGBClassifier(
         random_state=config.determinism.random_state,
-        n_jobs=-1,
+        n_jobs=config.tuning.n_jobs,
         enable_categorical=True
     )
 
     lgbm = LGBMClassifier(
         random_state=config.determinism.random_state,
-        n_jobs=-1,
-        verbose=-1
+        n_jobs=config.tuning.n_jobs,
+        verbose=False
     )
 
     cat = CatBoostClassifier(
@@ -140,15 +140,15 @@ def run_boosting_experiments(X_train, y_train, X_test, y_test, logger):
 
     print("\nXGBoost")
     grid_tuning(xgb, xgb_grid_params, X_train, y_train, X_test, y_test, **params, logger=logger)
-    optuna_tuning(xgb, xgb_optuna_params, X_train, y_train, X_test, y_test, **params, n_trials=50, logger=logger)
+    optuna_tuning(xgb, xgb_optuna_params, X_train, y_train, X_test, y_test, **params, n_trials=config.tuning.n_trials, logger=logger)
 
     print("\nLightGBM")
     grid_tuning(lgbm, lgbm_grid_params, X_train, y_train, X_test, y_test, **params, logger=logger)
-    optuna_tuning(lgbm, lgbm_optuna_params, X_train, y_train, X_test, y_test, **params, n_trials=50, logger=logger)
+    optuna_tuning(lgbm, lgbm_optuna_params, X_train, y_train, X_test, y_test, **params, n_trials=config.tuning.n_trials, logger=logger)
 
     print("\nCatBoost")
     grid_tuning(cat, catboost_grid_params, X_train, y_train, X_test, y_test, **params, logger=logger)
-    optuna_tuning(cat, catboost_optuna_params, X_train, y_train, X_test, y_test, **params, n_trials=50, logger=logger)
+    optuna_tuning(cat, catboost_optuna_params, X_train, y_train, X_test, y_test, **params, n_trials=config.tuning.n_trials, logger=logger)
 
 
 def run_dnn_experiments(X_train, y_train, X_test, y_test, logger):
