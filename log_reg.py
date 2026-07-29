@@ -3,28 +3,21 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
-from config_file import config
+from omegaconf import DictConfig
 from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.pipeline import Pipeline
+
 from utils import add_result, pipeline_return, preprocessor
 
 
 def logistic_kfold(
     X_train: pd.DataFrame,
     y_train: pd.Series,
-    penalty: str | None = None,
-    C: float | None = None,
-    l1_ratio: float | None = None,
-    solver: str | None = None,
-    tol: float | None = None,
-    fit_intercept: bool | None = None,
-    random_state: int | None = None,
-    max_iter: int | None = None,
-    verbose: int | None = None,
-    n_splits: int | None = None,
-    shuffle: bool | None = None,
-    logger: Any = None
+    X_test: pd.DataFrame,
+    y_test: pd.Series,
+    cfg: DictConfig,
+    logger: Any = None,
 ) -> dict[str, Any]:
     """
     Выполняет кросс-валидацию логистической регрессии с предобработкой данных.
@@ -32,44 +25,33 @@ def logistic_kfold(
     Args:
         X_train: Обучающие признаки
         y_train: Целевая переменная
-        penalty: Тип регуляризации ('l1', 'l2', 'elasticnet', None)
-        C: Параметр регуляризации (обратная сила регуляризации)
-        l1_ratio: Коэффициент смешивания для elasticnet
-        solver: Алгоритм оптимизации
-        tol: Толерантность остановки
-        fit_intercept: Добавлять ли свободный член
-        random_state: Seed для воспроизводимости
-        max_iter: Максимальное количество итераций
-        verbose: Уровень детализации
-        n_splits: Количество фолдов для кросс-валидации
+        X_test: Тестовые признаки (для логирования)
+        y_test: Тестовая целевая переменная (для логирования)
+        cfg: Конфигурация Hydra
+        logger: Объект логгера
 
     Returns:
-        Dict[str, Any]: Словарь с результатами, содержащий:
-            - model: Обученная модель
-            - fold_scores: Массив оценок по фолдам
-            - mean_score: Средняя точность
-            - std_score: Стандартное отклонение точности
-            - params: Параметры модели
+        Dict[str, Any]: Словарь с результатами
     """
-    penalty = penalty if penalty is not None else config.linear_model.penalty
-    C = C if C is not None else config.linear_model.C
-    l1_ratio = l1_ratio if l1_ratio is not None else config.linear_model.l1_ratio
-    solver = solver if solver is not None else config.linear_model.solver
-    tol = tol if tol is not None else config.linear_model.tol
-    fit_intercept = (
-        fit_intercept if fit_intercept is not None else config.linear_model.bias
-    )
-    random_state = (
-        random_state if random_state is not None else config.determinism.random_state
-    )
-    max_iter = max_iter if max_iter is not None else config.linear_model.max_iter
-    verbose = verbose if verbose is not None else config.linear_model.verbose
-    n_splits = n_splits if n_splits is not None else config.cv.n_splits
-    shuffle = shuffle if shuffle is not None else config.determinism.shuffle
+    # Извлекаем параметры из конфига
+    params = cfg.model.linear_model
+    training = cfg.training
+    determinism = cfg
 
-    skf = StratifiedKFold(
-        n_splits=n_splits, random_state=random_state, shuffle=shuffle
-    )
+    penalty = params.penalty
+    C = params.C
+    l1_ratio = params.l1_ratio
+    solver = params.solver
+    tol = params.tol
+    fit_intercept = params.fit_intercept
+    random_state = determinism.seed
+    max_iter = params.max_iter
+    verbose = params.verbose
+    n_splits = training.cv_folds
+    shuffle = training.shuffle
+    scoring = params.scoring
+
+    skf = StratifiedKFold(n_splits=n_splits, random_state=random_state, shuffle=shuffle)
 
     model = LogisticRegression(
         penalty=penalty,
@@ -83,23 +65,33 @@ def logistic_kfold(
         verbose=verbose,
     )
 
-    pipeline = Pipeline([
-        ("preprocessor", preprocessor(is_scale=config.scaling.is_scale, is_cat=config.is_cat)), 
-        ("model", model)])
+    pipeline = Pipeline(
+        [
+            (
+                "preprocessor",
+                preprocessor(
+                    is_scale=cfg.preprocessing.scale_numeric,
+                    is_cat=cfg.preprocessing.encode_categorical,
+                    scaler_type=cfg.preprocessing.scaler_type,
+                ),
+            ),
+            ("model", model),
+        ]
+    )
 
-    scores = cross_val_score(pipeline, X_train, y_train, cv=skf, scoring=config.linear_model.scoring)
+    scores = cross_val_score(pipeline, X_train, y_train, cv=skf, scoring=scoring)
 
-    if config.logs.console:
+    if cfg.logging.console:
         for fold, acc in enumerate(scores, start=1):
             print(f"fold-{fold} accuracy: {acc}")
-
 
     pipeline.fit(X_train, y_train)
 
     model = pipeline.named_steps["model"]
 
-    if config.logs.console:
+    if cfg.logging.console:
         print(f"{model} mean accuracy: {np.mean(scores)}")
+        print(f"Test accuracy: {pipeline.score(X_test, y_test)}")
 
     res = pipeline_return(pipeline, scores)
     experiment = add_result(res)
@@ -108,10 +100,13 @@ def logistic_kfold(
         logger.log_experiment(experiment)
 
     model_name = model.__class__.__name__
-    filename = f"models/{model_name}_log_reg_cv_{scores:.4f}.pkl"
+    filename = (
+        f"{cfg.data.models_dir}/{model_name}_log_reg_cv_{np.mean(scores):.4f}.pkl"
+    )
     joblib.dump(pipeline, filename)
 
-    logger.log_pipeline(filename)
+    if logger is not None:
+        logger.log_pipeline(filename)
 
     print(f"Pipeline saved as: {filename}")
 
@@ -125,87 +120,61 @@ def logistic_kfold(
 
 
 def log_reg_cv(
-    X_train: pd.DataFrame, 
-    y_train: pd.Series, 
-    X_test: pd.DataFrame, 
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    X_test: pd.DataFrame,
     y_test: pd.Series,
-    tol: float | None = None,
-    fit_intercept: bool | None = None,
-    random_state: int | None = None,
-    max_iter: int | None = None,
-    solver: str | None = None,
-    cv: int | Any = None,
-    refit: bool | None = None,
-    Cs: int | list[float] | np.ndarray = None,
-    verbose: int | None = None,
-    scoring: str | None = None,
-    logger: Any = None
+    cfg: DictConfig,
+    logger: Any = None,
 ) -> dict[str, Any]:
     """
     Выполняет поиск гиперпараметров логистической регрессии с помощью встроенной кросс-валидации.
 
-    Функция строит конвейер (Pipeline) с предобработкой данных, запускает 
-    оптимизацию параметра обратной силы регуляризации `C` по заданной сетке 
-    значений `Cs` с использованием встроенного класса `LogisticRegressionCV`. 
-    После поиска лучшая модель дообучается на всей тренировочной выборке 
-    и оценивается на тестовых данных. Результаты сохраняются в лог.
-
     Args:
-        X_train: Матрица признаков обучающей выборки.
-        y_train: Вектор целевой переменной для обучения.
-        X_test: Матрица признаков тестовой выборки для финального контроля.
-        y_test: Вектор целевой переменной тестовой выборки.
-        tol: Толерантность (порог) остановки алгоритма оптимизации.
-        fit_intercept: Флаг добавления константы (свободного члена) в модель.
-        random_state: Зерно генератора случайных чисел для воспроизводимости.
-        max_iter: Максимальное количество итераций сходимости алгоритма.
-        solver: Алгоритм оптимизации (например, 'lbfgs', 'saga', 'liblinear').
-        cv: Стратегия кросс-валидации (число фолдов или генератор разбиений).
-        refit: Если True, дообучает модель на всех тренировочных данных с лучшим C.
-        Cs: Описание сетки значений параметра C (число шагов или массив значений).
-        verbose: Уровень детализации вывода системных логов обучения.
-        scoring: Строковое имя метрики для оптимизации (например, 'accuracy').
+        X_train: Обучающие признаки
+        y_train: Целевая переменная
+        X_test: Тестовые признаки
+        y_test: Тестовая целевая переменная
+        cfg: Конфигурация Hydra
+        logger: Объект логгера
 
     Returns:
-        Dict[str, Any]: Словарь с ключевыми результатами эксперимента:
-            - 'model': Обученный объект модели LogisticRegressionCV из пайплайна.
-            - 'best_C': Оптимальное найденное значение параметра регуляризации C.
-            - 'best_cv_score': Лучшая средняя точность на внутренней кросс-валидации.
-            - 'test_score': Финальная точность модели на отложенной тестовой выборке.
+        Dict[str, Any]: Словарь с результатами
     """
-    tol = tol if tol is not None else config.linear_model.tol
-    fit_intercept = fit_intercept if fit_intercept is not None else config.linear_model.bias
-    random_state = random_state if random_state is not None else config.determinism.random_state
-    max_iter = max_iter if max_iter is not None else config.linear_model.max_iter
-    solver = solver if solver is not None else config.linear_model.solver
-    cv = cv if cv is not None else config.linear_model.cv
-    refit = refit if refit is not None else config.linear_model.refit
-    Cs = Cs if Cs is not None else config.linear_model.Cs
-    verbose = verbose if verbose is not None else config.linear_model.verbose
-    scoring = scoring if scoring is not None else config.linear_model.scoring
-
+    params = cfg.model.linear_model
+    training = cfg.training
+    determinism = cfg
 
     model_cv = LogisticRegressionCV(
-        tol=tol,
-        fit_intercept=fit_intercept,
-        random_state=random_state,
-        max_iter=max_iter,
-        solver=solver,
-        cv=cv,
-        refit=refit, 
-        Cs=Cs,
-        verbose=verbose,
-        scoring=scoring
+        tol=params.tol,
+        fit_intercept=params.fit_intercept,
+        random_state=determinism.seed,
+        max_iter=params.max_iter,
+        solver=params.solver,
+        cv=training.cv_folds,
+        refit=params.refit,
+        Cs=params.Cs,
+        verbose=params.verbose,
+        scoring=params.scoring,
     )
 
-    pipeline_cv = Pipeline([
-            ('preprocessor', preprocessor(is_scale=True, is_cat=config.is_cat)),
-            ('model', model_cv)
-        ])
+    pipeline_cv = Pipeline(
+        [
+            (
+                "preprocessor",
+                preprocessor(
+                    is_scale=cfg.preprocessing.scale_numeric,
+                    is_cat=cfg.preprocessing.encode_categorical,
+                    scaler_type=cfg.preprocessing.scaler_type,
+                ),
+            ),
+            ("model", model_cv),
+        ]
+    )
 
     pipeline_cv.fit(X_train, y_train)
 
-    best_model = pipeline_cv.named_steps['model']
+    best_model = pipeline_cv.named_steps["model"]
     best_C = best_model.C_.item()
 
     scores = best_model.scores_
@@ -227,9 +196,17 @@ def log_reg_cv(
         logger.log_experiment(experiment)
 
     model_name = model_cv.__class__.__name__
-    filename = f"models/{model_name}_log_reg_cv_{best_cv_score:.4f}.pkl"
+    filename = f"{cfg.data.models_dir}/{model_name}_log_reg_cv_{best_cv_score:.4f}.pkl"
     joblib.dump(pipeline_cv, filename)
 
-    logger.log_pipeline(filename)
+    if logger is not None:
+        logger.log_pipeline(filename)
 
     print(f"Pipeline saved as: {filename}")
+
+    return {
+        "model": best_model,
+        "best_C": best_C,
+        "best_cv_score": best_cv_score,
+        "test_score": test_acc,
+    }

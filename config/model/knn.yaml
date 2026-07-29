@@ -1,7 +1,23 @@
-name: "knn"
-n_neighbors: 3
-weights: "uniform"
-algorithm: "auto"
-leaf_size: 2
+_target_: sklearn.neighbors.KNeighborsClassifier
+
+n_neighbors: 5
+
+weights: uniform
+
+algorithm: auto
+
+leaf_size: 30
+
 p: 2
-metric: "minkowski"
+
+metric: minkowski
+
+is_cat: ${preprocessing.encode_categorical}
+
+is_scale: ${preprocessing.scale_numeric}
+
+grid_params:
+  model__n_neighbors: [3, 5, 7, 9, 11, 13, 15, 17]
+  model__weights: ["distance", "uniform"]
+  model__leaf_size: [20, 30, 50]
+  model__metric: ["cosine", "manhattan", "euclidean"]

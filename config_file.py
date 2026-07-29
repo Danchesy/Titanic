@@ -1,3 +1,5 @@
+# Нужен только для EDA, оставлен т.к. изначально все писал через такой конфиг 
+
 from pathlib import Path
 
 from omegaconf import OmegaConf
@@ -5,16 +7,7 @@ from omegaconf import OmegaConf
 BASE_DIR = Path(__file__).resolve().parent
 
 conf = {
-    "logs": {
-        "console": True, 
-        "file": True, 
-        "wandb": {
-            "enabled": True,
-            "project": "titanic",
-            "entity": None,
-            "tags": ["classification"],
-        }
-    },
+    "logs": {"console": True, "file": False, "wandb": True},
     "paths": {
         "path_to_train": BASE_DIR / "data" / "train.csv",
         "path_to_test": BASE_DIR / "data" / "test.csv",
@@ -27,6 +20,7 @@ conf = {
         "is_scale": True,
         "scaler": "StandardScaler",  # StandardScaler, MinMaxScaler
     },
+
     "train_test_split": {
         "test_size": 0.2,
         "is_val_set": False,
@@ -97,13 +91,8 @@ conf = {
         "max_samples": None,
         "monotonic_cst": None,
     },
-    "tuning": {
-        "n_trials": 50,
-        "timeout": 3600,  # секунд
-        "n_jobs": -1
-    },
     "target_column_name": "Survived",
-    "is_cat": True,
+    "is_cat": True
 }
 
 config = OmegaConf.create(conf)

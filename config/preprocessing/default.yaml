@@ -1,0 +1,11 @@
+drop_columns:
+  - PassengerId
+  - Name
+  - Ticket
+  - Cabin
+
+scale_numeric: true
+
+scaler_type: StandardScaler  # StandardScaler | MinMaxScaler
+
+encode_categorical: true

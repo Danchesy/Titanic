@@ -1,4 +1,6 @@
 import json
+import os
+import random
 from typing import Any
 
 import joblib
@@ -6,44 +8,38 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import torch
 import wandb
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
-from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, StandardScaler
 
-from config_file import config
-
 __all__ = [
-    'FeatureEngineer',
-    'WandbLogger',
-    'add_result',
-    'data_loading',
-    'data_preparation',
-    'data_scaling',
-    'generate_submission',
-    'model_return',
-    'pipeline_return',
-    'plot_feature_importance',
-    'preprocessor',
-    'train_val_test_split',
+    "FeatureEngineer",
+    "WandbLogger",
+    "add_result",
+    "data_loading",
+    "pipeline_return",
+    "plot_feature_importance",
+    "preprocessor",
+    "set_seed"
 ]
 
 
 class FeatureEngineer(BaseEstimator, TransformerMixin):
     """
     Класс для инженерии признаков в датасете Titanic.
-    
+
     Выполняет следующие преобразования:
     - Извлечение титулов из имен пассажиров
     - Заполнение пропусков в возрасте средними значениями по титулам
     - Создание категорий на основе стоимости билета
     - Создание бинарных признаков (Male, Alone, Child)
     - Удаление неинформативных признаков
-    
+
     Attributes:
         q_num (int): Количество категорий для дискретизации стоимости билета
         embarked_mode_ (str): Модальное значение порта посадки
@@ -51,11 +47,11 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         bins_ (np.ndarray): Границы категорий для Fare_cat
         cat_cols (List[str]): Список категориальных колонок
     """
-    
+
     def __init__(self, q_num: int = 4):
         """
         Инициализация FeatureEngineer.
-        
+
         Args:
             q_num: Количество категорий для дискретизации стоимости билета
         """
@@ -65,19 +61,19 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         self.bins_: np.ndarray | None = None
         self.cat_cols: list[str] = ["Pclass", "Embarked", "Fare_cat", "Initial", "Male"]
 
-    def fit(self, X: pd.DataFrame, y: pd.Series | None = None) -> 'FeatureEngineer':
+    def fit(self, X: pd.DataFrame, y: pd.Series | None = None) -> "FeatureEngineer":
         """
         Обучает трансформер на основе обучающих данных.
-        
+
         Вычисляет:
         - Модальное значение порта посадки
         - Средний возраст для каждого титула
         - Границы категорий для дискретизации стоимости билета
-        
+
         Args:
             X: Обучающий датафрейм с признаками
             y: Целевая переменная (не используется)
-            
+
         Returns:
             self: Возвращает экземпляр класса для цепочки вызовов
         """
@@ -101,13 +97,13 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         """
         Преобразует данные, применяя инженерию признаков.
-        
+
         Args:
             X: Датафрейм для преобразования
-            
+
         Returns:
             pd.DataFrame: Преобразованный датафрейм с новыми признаками
-            
+
         Raises:
             AssertionError: Если после заполнения остались пропуски в возрасте
         """
@@ -150,22 +146,21 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
 class WandbLogger:
     """Логирование экспериментов в Weights & Biases."""
 
-    def __init__(self, config) -> None:
-        self.enabled = config.logs.wandb.enabled
+    def __init__(self, cfg: DictConfig) -> None:
+        self.enabled = cfg.logging.wandb.enabled
 
         if not self.enabled:
             return
 
         wandb.init(
-            project=config.logs.wandb.project,
-            entity=config.logs.wandb.entity,
-            tags=config.logs.wandb.tags,
-            config=OmegaConf.to_container(config, resolve=True),
+            project=cfg.logging.wandb.project,
+            entity=cfg.logging.wandb.entity,
+            tags=cfg.logging.wandb.tags,
+            config=OmegaConf.to_container(cfg, resolve=True),
         )
 
     def log_experiment(self, experiment: dict[str, Any]) -> None:
         """Логирует результаты одного эксперимента."""
-
         if not self.enabled:
             return
 
@@ -182,35 +177,8 @@ class WandbLogger:
 
         wandb.log(log_data)
 
-    def log_feature_importance(self, importance_df) -> None:
-        """Сохраняет feature importance."""
-
-        if not self.enabled:
-            return
-
-        wandb.log(
-            {
-                "feature_importance": wandb.Table(
-                    dataframe=importance_df
-                )
-            }
-        )
-
-    def log_shap(self, image_path: str) -> None:
-        """Сохраняет SHAP-график."""
-
-        if not self.enabled:
-            return
-
-        wandb.log(
-            {
-                "shap_summary": wandb.Image(image_path)
-            }
-        )
-
     def log_pipeline(self, model_path: str) -> None:
         """Сохраняет обученную модель."""
-
         if not self.enabled:
             return
 
@@ -225,197 +193,60 @@ class WandbLogger:
 
     def finish(self) -> None:
         """Завершает текущий run."""
-
         if self.enabled:
             wandb.finish()
 
 
+def set_seed(seed: int = 42) -> None:
+    """Фиксирует seed для всех используемых библиотек (Python, NumPy, PyTorch)."""
+    random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+
 def data_loading(
-        train_path = config.paths.path_to_train, 
-        test_path = config.paths.path_to_test):
-    train_data = pd.read_csv(train_path)
-    train_data.set_index('PassengerId', inplace=True)
+    cfg: DictConfig,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.DataFrame]:
+    """Загружает и разделяет данные."""
+    train = pd.read_csv(cfg.data.train_path)
+    test = pd.read_csv(cfg.data.test_path)
 
-    test_data = pd.read_csv(test_path)
-    test_data.set_index('PassengerId', inplace=True)
+    train.set_index("PassengerId", inplace=True)
+    test.set_index("PassengerId", inplace=True)
 
-    train, test = train_data.copy(deep=True), test_data.copy(deep=True)
-
-    X, y = train.drop(columns = config.target_column_name, axis = 1), train[config.target_column_name]
+    X = train.drop(columns=cfg.target_column)
+    y = train[cfg.target_column]
 
     X_train, X_val, y_train, y_val = train_test_split(
-        X, y,
-        test_size = config.train_test_split.test_size,
-        random_state = config.determinism.random_state,
-        shuffle=config.determinism.shuffle,
-        stratify=y
+        X,
+        y,
+        test_size=cfg.training.test_size,
+        random_state=cfg.training.random_state,
+        shuffle=cfg.training.shuffle,
+        stratify=y,
     )
 
     return X_train, X_val, y_train, y_val, test
 
 
-def data_scaling(
-    train: pd.DataFrame,
-    test: pd.DataFrame,
-    scaler: str = "StandardScaler",
-    val: pd.DataFrame | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame] | tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Выполняет масштабирование признаков для обучающей, тестовой и валидационной выборок.
-    
-    Args:
-        train: Обучающий датафрейм с признаками
-        test: Тестовый датафрейм с признаками
-        scaler: Тип масштабировщика. Допустимые значения: 'StandardScaler', 'MinMaxScaler'
-        val: Необязательный валидационный датафрейм с признаками
-
-    Returns:
-        Если val передан: Кортеж из трех DataFrame (train_scaled, val_scaled, test_scaled)
-        Если val равен None: Кортеж из двух DataFrame (train_scaled, test_scaled)
-
-    Raises:
-        ValueError: Если передан неподдерживаемый тип масштабировщика
-    """
-    if config.logs.console:
-        print(f"Scaling Data with {scaler}...")
-
-    if scaler == "StandardScaler":
-        s = StandardScaler()
-    elif scaler == "MinMaxScaler":
-        s = MinMaxScaler()
-    else:
-        print(f"Invalid Scaler {scaler}")
-        raise ValueError
-
-    # Сохраняем формат Pandas DataFrame на выходе
-    s.set_output(transform="pandas")
-
-    train_scaled = s.fit_transform(train)
-    test_scaled = s.transform(test)
-
-    if config.logs.console:
-        print("Data Scaled Successfully!\n")
-
-    if val is not None:
-        val_scaled = s.transform(val)
-        return train_scaled, val_scaled, test_scaled
-
-    return train_scaled, test_scaled
-
-
-def train_val_test_split(
-    X: pd.DataFrame, y: pd.Series
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series]:
-    """
-    Разделяет исходные данные на три изолированные выборки: обучающую, валидационную и тестовую.
-
-    Разделение происходит в два этапа с обязательной стратификацией по целевой переменной.
-    Параметры разделения берутся из config_file.py.
-
-    Args:
-        X: Матрица признаков (исходный DataFrame без целевой переменной)
-        y: Вектор целевой переменной (Pandas Series)
-
-    Returns:
-        Кортеж из шести элементов: X_train, X_val, X_test, y_train, y_val, y_test
-    """
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=config.train_test_split.test_size,
-        random_state=config.determinism.random_state,
-        shuffle=config.determinism.shuffle,
-        stratify=y,
-    )
-
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_train,
-        y_train,
-        test_size=config.train_test_split.val_size,
-        random_state=config.determinism.random_state,
-        shuffle=config.determinism.shuffle,
-        stratify=y_train,
-    )
-
-    return X_train, X_val, X_test, y_train, y_val, y_test
-
-
-def data_preparation(
-    train: pd.DataFrame, 
-    test: pd.DataFrame
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Выполняет подготовку данных для обучения и тестирования.
-
-    Args:
-        train: Обучающий датафрейм
-        test: Тестовый датафрейм
-
-    Returns:
-        Tuple[pd.DataFrame, pd.DataFrame]: Подготовленные обучающий и тестовый датафреймы
-
-    Raises:
-        AssertionError: Если после заполнения остались пропуски в возрасте
-    """
-    train, test = train.copy(), test.copy()
-    for data in [train, test]:
-        data["Male"] = np.where(data["Sex"] == "male", 1, 0)
-
-        embarked_mode = data["Embarked"].mode().item()
-        data["Embarked"] = data["Embarked"].fillna(embarked_mode)
-
-        # Создаем столбец с титулами
-        data["Initial"] = data["Name"].str.extract(r"([A-Za-z]+)\.")
-
-        # Заменяем редкие титулы на Other
-        data["Initial"] = np.where(
-            data["Initial"].isin(["Mr", "Mrs", "Miss", "Master"]),
-            data["Initial"],
-            "Other",
-        )
-
-    # Dictionary {Initial: Mean age}
-    ini_to_age = train.groupby("Initial")["Age"].mean().round().to_dict()
-
-    q_num = 4
-    _, bins = pd.qcut(train["Fare"], q=q_num, labels=False, retbins=True)
-
-    # Чтобы билет стоимостью 0.0 попал в категорию
-    bins -= 0.001
-
-    for data in [train, test]:
-        data["Age"] = data["Age"].fillna(data["Initial"].map(ini_to_age))
-        assert data["Age"].isnull().sum().item() == 0
-
-        # Feature generation
-        data["Fare_cat"] = pd.cut(
-            data["Fare"], bins=bins, labels=False, include_lowest=True
-        )
-
-        # Если в тесте будут цены выше тех что были в трейне даем категорию q_num - 1
-        data["Fare_cat"] = data["Fare_cat"].fillna(q_num - 1).astype(int)
-
-        data["Alone"] = np.where((data["Parch"] + data["SibSp"]) == 0, 1, 0)
-        data["Child"] = np.where(data["Age"] <= 5, 1, 0)
-
-        # Dropping useless features
-        data.drop(
-            columns=["Sex", "Name", "Ticket", "Cabin", "Fare"], axis=1, inplace=True
-        )
-
-        cat_cols = ["Pclass", "Embarked", "Fare_cat", "Initial", "Male"]
-        data[cat_cols] = data[cat_cols].astype("category")
-
-    return train, test
-
-
-def preprocessor(is_scale: bool = config.scaling.is_scale, is_cat: bool = True) -> Pipeline:
+def preprocessor(
+    is_scale: bool = True,
+    is_cat: bool = True,
+    scaler_type: str = "StandardScaler",
+) -> Pipeline:
     """
     Создает пайплайн предобработки данных с возможностью масштабирования и кодирования.
 
     Args:
         is_scale: Флаг, определяющий необходимость масштабирования числовых признаков
         is_cat: Флаг, определяющий необходимость кодирования категориальных признаков
+        scaler_type: Тип скейлера ("StandardScaler" или "MinMaxScaler")
 
     Returns:
         Pipeline: Пайплайн предобработки данных
@@ -426,7 +257,7 @@ def preprocessor(is_scale: bool = config.scaling.is_scale, is_cat: bool = True) 
 
     if not is_cat and not is_scale:
         return FeatureEngineer()  # type: ignore
-    
+
     if is_cat:
         transformers.append(
             (
@@ -437,12 +268,12 @@ def preprocessor(is_scale: bool = config.scaling.is_scale, is_cat: bool = True) 
         )
 
     if is_scale:
-        if config.scaling.scaler == "StandardScaler":
+        if scaler_type == "StandardScaler":
             scaler = StandardScaler()
-        elif config.scaling.scaler == "MinMaxScaler":
+        elif scaler_type == "MinMaxScaler":
             scaler = MinMaxScaler()
         else:
-            raise ValueError(f"Unsupported scaler: {config.scaling.scaler}")
+            raise ValueError(f"Unsupported scaler: {scaler_type}")
 
         transformers.append(("num", scaler, num_columns))
 
@@ -451,41 +282,15 @@ def preprocessor(is_scale: bool = config.scaling.is_scale, is_cat: bool = True) 
 
     cols_trans = ColumnTransformer(transformers, remainder="passthrough")
 
-    pipeline = Pipeline([
-        ("feature_engineering", FeatureEngineer()), 
-        ("cols_transformer", cols_trans)]
+    pipeline = Pipeline(
+        [("feature_engineering", FeatureEngineer()), ("cols_transformer", cols_trans)]
     )
 
     return pipeline
 
 
-def model_return(
-    model: LogisticRegression, 
-    accuracies: float | list[float] | np.ndarray
-) -> dict[str, Any]:
-    """
-    Формирует словарь с результатами модели.
-
-    Args:
-        model: Обученная модель
-        accuracies: Значение точности или массив значений точности
-
-    Returns:
-        Dict[str, Any]: Словарь с результатами
-    """
-    if not isinstance(accuracies, (list, np.ndarray)):
-        accuracies = [accuracies]
-
-    return {
-        "model": model,
-        "mean_score": np.mean(accuracies),
-        "std_score": np.std(accuracies),
-        "params": model.get_params(),
-    }
-
-
 def pipeline_return(
-    pipeline: Pipeline, 
+    pipeline: Pipeline,
     cv_scores: list[float] | np.ndarray,
     tuning_time: float | None = None,
     predict_time: float | None = None,
@@ -520,14 +325,14 @@ def pipeline_return(
             latency_ms = (predict_time / n_samples) * 1000
             result["latency_ms_per_sample"] = round(latency_ms, 4)
 
-    return result 
+    return result
 
 
 def add_result(
-    output: dict[str, Any], 
-    results: list[dict[str]] | list[dict[Any]] | None = None, 
-    log_file_path: str | None = None
-) -> None:
+    output: dict[str, Any],
+    results: list[dict[str]] | list[dict[Any]] | None = None,
+    log_file_path: str | None = None,
+) -> dict[str, Any]:
     """
     Добавляет результат в список и дописывает его в файл на диске.
 
@@ -535,11 +340,10 @@ def add_result(
         output: Словарь-результат эксперимента
         results: Глобальный список для хранения истории в текущей сессии
         log_file_path: Путь к файлу на диске, куда будут дописываться логи
-    """
-    log_file_path = (
-        log_file_path if log_file_path is not None else config.paths.experiments_log
-    )
 
+    Returns:
+        Dict[str, Any]: Словарь с данными эксперимента
+    """
     if "model" in output:
         model_name = type(output["model"]).__name__
     elif "pipeline" in output:
@@ -564,18 +368,17 @@ def add_result(
 
     # Дописываем в файл ('a' — append)
     # JSON Lines (один эксперимент — одна строчка в файле)
-    if config.logs.file:
+    if log_file_path:
         with open(log_file_path, mode="a", encoding="utf-8") as f:
-            # json.dumps превращает словарь в одну текстовую строку
             f.write(json.dumps(experiment_data, ensure_ascii=False) + "\n")
-    
+
     return experiment_data
 
 
 def plot_feature_importance(
-    model: Any, 
-    feature_names: list[str], 
-    top_n: int = 20
+    model: Any,
+    feature_names: list[str],
+    top_n: int = 20,
 ) -> None:
     """
     Визуализирует важность признаков для моделей с атрибутом feature_importances_.
@@ -613,9 +416,10 @@ def plot_feature_importance(
 
 
 def generate_submission(
-    pipeline_path="models/full_pipeline.pkl", 
-    output_path="data/submission.csv"
-):
+    pipeline_path: str = "models/full_pipeline.pkl",
+    output_path: str = "data/submission.csv",
+) -> None:
+    """Генерирует файл сабмита из сохранённого пайплайна."""
     pipeline = joblib.load(pipeline_path)
 
     *_, test = data_loading()

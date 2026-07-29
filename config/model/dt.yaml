@@ -1,13 +1,18 @@
-name: "dt"
-criterion: "gini"
-splitter: "best"
-max_depth: 3
-min_samples_split: 2
-min_samples_leaf: 1
-min_weight_fraction_leaf: 0.0
-max_features: null
-max_leaf_nodes: null
-min_impurity_decrease: 0.0
-class_weight: null
-ccp_alpha: 0.0
-monotonic_cst: null
+_target_: sklearn.tree.DecisionTreeClassifier
+
+criterion: gini
+
+max_depth: 8
+
+random_state: ${seed}
+
+is_cat: ${preprocessing.encode_categorical}
+
+is_scale: false
+
+grid_params:
+  model__max_depth: [3, 5, 7]
+  model__min_samples_split: [5, 20]
+  model__min_samples_leaf: [2, 10]
+  model__max_features: [null, "sqrt", "log2"]
+  model__max_leaf_nodes: [null, 25, 50]

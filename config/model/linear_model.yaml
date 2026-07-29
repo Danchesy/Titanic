@@ -1,13 +1,27 @@
-name: "linear_model"
-penalty: "l1"
+_target_: sklearn.linear_model.LogisticRegression
+
+penalty: l2
+
 C: 1.0
+
 l1_ratio: 0.0
-max_iter: 100
-solver: "${solver_mapping.${model.penalty}}" 
-tol: 1e-4
-bias: true
+
+solver: liblinear
+
+tol: 0.0001
+
+fit_intercept: true
+
+max_iter: 1000
+
 verbose: 0
-cv: 5
-refit: true
-Cs: 10
-scoring: "accuracy"
+
+is_cat: ${preprocessing.encode_categorical}
+
+is_scale: ${preprocessing.scale_numeric}
+
+grid_params:
+  model__C: [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+  model__penalty: ["l1", "l2"]
+  model__solver: ["liblinear"]
+  model__fit_intercept: [true, false]

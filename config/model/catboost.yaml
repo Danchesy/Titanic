@@ -1,15 +1,27 @@
-name: "catboost"
-iterations: 150
+_target_: catboost.CatBoostClassifier
+
+iterations: 300
+
 learning_rate: 0.05
-depth: 4
-l2_leaf_reg: 5.0
-bootstrap_type: "Bernoulli"   # стандартный бэггинг строк
-subsample: 0.7                # Доля объектов на дерево
-rsm: 0.7                      # Доля признаков на дерево (colsample_bylevel)
+
+depth: 6
+
 cat_features:
-  - "Pclass"
-  - "Embarked"
-  - "Fare_cat"
-  - "Initial"
-  - "Male"
+  - Embarked
+  - Initial
+  - Fare_cat
+  - Pclass
+  - Male
+
 verbose: false
+
+random_seed: ${seed}
+
+is_cat: false
+
+is_scale: false
+
+grid_params:
+  model__iterations: [100, 150, 200]
+  model__learning_rate: [0.01, 0.05, 0.1]
+  model__depth: [3, 4, 6]

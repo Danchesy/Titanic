@@ -1,0 +1,13 @@
+enabled: true
+
+n_trials: 1
+
+timeout: null
+
+direction: maximize
+
+metric: accuracy
+
+use_optuna: true
+
+use_grid_search: false

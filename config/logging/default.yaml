@@ -1,0 +1,16 @@
+console: true
+
+save_model: true
+
+save_predictions: true
+
+wandb:
+
+  enabled: false
+
+  project: titanic
+
+  entity: null
+
+  tags:
+    - classification

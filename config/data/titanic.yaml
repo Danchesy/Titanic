@@ -1,0 +1,11 @@
+train_path: data/train.csv
+
+test_path: data/test.csv
+
+submission_path: data/gender_submission.csv
+
+models_dir: models
+
+results_dir: results
+
+reports_dir: reports

@@ -1,0 +1,19 @@
+liblinear:
+  penalty:
+    - l1
+    - l2
+
+lbfgs:
+  penalty:
+    - l2
+    - none
+
+newton-cg:
+  penalty:
+    - l2
+
+saga:
+  penalty:
+    - l1
+    - l2
+    - elasticnet
