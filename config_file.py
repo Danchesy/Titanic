@@ -9,9 +9,9 @@ BASE_DIR = Path(__file__).resolve().parent
 conf = {
     "logs": {"console": True, "file": False, "wandb": True},
     "paths": {
-        "path_to_train": BASE_DIR / "data" / "train.csv",
-        "path_to_test": BASE_DIR / "data" / "test.csv",
-        "experiments_log": BASE_DIR / "log" / "experiments.jsonl",
+        "path_to_train": BASE_DIR / "dataset" / "train.csv",
+        "path_to_test": BASE_DIR / "dataset" / "test.csv",
+        "experiments_log": BASE_DIR / "results" / "experiments.jsonl",
     },
     "determinism": {
         "random_state": 42, 

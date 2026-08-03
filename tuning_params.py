@@ -1,18 +1,16 @@
 import os
-import time
 from collections.abc import Callable
 from typing import Any
 
 import joblib
-import numpy as np
 import optuna
 import pandas as pd
+from omegaconf import DictConfig
 from sklearn.base import clone
-from sklearn.metrics import accuracy_score
 from sklearn.model_selection import GridSearchCV, cross_val_score
 from sklearn.pipeline import Pipeline
 
-from utils import add_result, pipeline_return, preprocessor
+from utils import *
 
 __all__ = [
     "catboost_grid_params",
@@ -33,13 +31,6 @@ __all__ = [
 ]
 
 
-def _pipeline_fit_params(cat_features: list[str] | None) -> dict[str, Any]:
-    """Параметры fit для CatBoost: cat_features нельзя задавать в __init__ (ломает CV clone)."""
-    if not cat_features:
-        return {}
-    return {"model__cat_features": list(cat_features)}
-
-
 def grid_tuning(
     model: Any,
     params: dict[str, Any],
@@ -47,9 +38,12 @@ def grid_tuning(
     y_train: pd.Series,
     X_test: pd.DataFrame,
     y_test: pd.Series,
+    cfg: DictConfig,
+    model_cfg: DictConfig,
     is_scale: bool = True,
     is_cat: bool = True,
     cat_features: list[str] | None = None,
+    X_submit: pd.DataFrame | None = None,
     logger: Any = None,
 ) -> GridSearchCV:
     """Обёртка GridSearchCV: строит пайплайн с предобработкой, обучает, логирует и сохраняет лучший estimator.
@@ -67,11 +61,14 @@ def grid_tuning(
         Обученный ``GridSearchCV`` с лучшим estimator'ом в ``best_estimator_``.
     """
 
-    os.makedirs("models", exist_ok=True)
+    ensure_dirs(cfg)
+    console = cfg.logging.console
+    metric = cfg.tuning.metric
+    cv_folds = cfg.training.cv_folds
 
     pipeline = Pipeline(
         [
-            ("preprocessor", preprocessor(is_scale=is_scale, is_cat=is_cat)),
+            ("preprocessor", build_preprocessor(cfg, model_cfg, is_scale=is_scale, is_cat=is_cat)),
             ("model", model),
         ]
     )
@@ -79,55 +76,53 @@ def grid_tuning(
     grid_search = GridSearchCV(
         estimator=pipeline,
         param_grid=params,
-        scoring="accuracy",
+        scoring=metric,
         refit=True,
-        cv=5,
+        cv=cv_folds,
         n_jobs=-1,
-        verbose=1,
+        verbose=1 if console else 0,
         pre_dispatch="2*n_jobs",
         return_train_score=False,
     )
 
-    start_train = time.time()
-    grid_search.fit(X_train, y_train, **_pipeline_fit_params(cat_features))
-    train_time = time.time() - start_train
+    train_output = run_method(obj=grid_search, method_name='fit', stage='train', X=X_train, y=y_train, **pipeline_fit_params(cat_features))
 
-    print(f"Best parameters: {grid_search.best_params_}")
-    print(f"Best CV Accuracy: {grid_search.best_score_:.4f}")
-    print(f"GridSearch trainig time: {train_time:.2f} s.")
+    log(f"Best parameters: {grid_search.best_params_}", console)
+    log(f"Best CV {metric}: {grid_search.best_score_:.4f}", console)
+    log(f"GridSearch trainig time: {train_output['train_time_sec']:.2f} s.", console)
 
     best_pipeline = grid_search.best_estimator_
 
-    start_predict = time.time()
-    test_preds = best_pipeline.predict(X_test)
-    predict_time = time.time() - start_predict
+    pred_output = holdout_score(pipeline=best_pipeline, X=X_test, y=y_test, metric=metric, method_name='fit', stage='train')
 
-    final_acc = accuracy_score(y_test, test_preds)
-
-    print(f"X_test Accuracy: {final_acc:.4f}")
-    print(f"X_test time predict ({len(X_test)} lines): {predict_time:.4f} s.")
-    print(f"Latency: {(predict_time / len(X_test)) * 1000:.4f} ms")
+    log(f"Holdout {metric}: {pred_output['result']:.4f}", console)
+    log(f"Holdout predict ({len(X_test)} lines): {pred_output['result']:.4f} s.", console)
+    log(f"Latency: {(pred_output['predict_time_sec'] / len(X_test)) * 1000:.4f} ms", console)
 
     res = pipeline_return(
         best_pipeline,
         grid_search.best_score_,
-        tuning_time=train_time,
-        predict_time=predict_time,
+        tuning_time=train_output["train_time_sec"],
+        predict_time=pred_output["predict_time_sec"],
         n_samples=len(X_test),
     )
-    experiment = add_result(res)
+    experiment = add_result(res, log_file_path=os.path.join(cfg.data.results_dir, "experiments.jsonl"))
 
     if logger is not None:
         logger.log_experiment(experiment)
 
     model_name = model.__class__.__name__
-    filename = f"models/{model_name}_grid_acc_{grid_search.best_score_:.4f}.pkl"
-    joblib.dump(best_pipeline, filename)
+    filename = model_filename(cfg, model_name, "grid", grid_search.best_score_)
 
-    if logger is not None:
-        logger.log_pipeline(filename)
+    if cfg.logging.save_model:
+        joblib.dump(best_pipeline, filename)
+        if logger is not None:
+            logger.log_pipeline(filename)
+        log(f"Pipeline saved as: {filename}", console)
 
-    print(f"Pipeline saved as: {filename}")
+    if cfg.logging.save_predictions and X_submit is not None:
+        submit_path = submission_output_path(cfg, model_name)
+        save_submission(best_pipeline, X_submit, submit_path)
 
     return grid_search
 
@@ -139,11 +134,13 @@ def optuna_tuning(
     y_train: pd.Series,
     X_test: pd.DataFrame,
     y_test: pd.Series,
-    direction: str = "maximize",
+    cfg: DictConfig,
+    model_cfg: DictConfig,
     n_trials: int = 20,
     is_scale: bool = True,
     is_cat: bool = True,
     cat_features: list[str] | None = None,
+    X_submit: pd.DataFrame | None = None,
     logger: Any = None,
 ) -> optuna.Study:
     """Оптимизация гиперпараметров через Optuna с 5-fold CV внутри objective.
@@ -162,9 +159,14 @@ def optuna_tuning(
         Завершённый ``optuna.Study`` с атрибутами ``best_params`` и ``best_value``.
     """
 
-    os.makedirs("models", exist_ok=True)
+    ensure_dirs(cfg)
+    console = cfg.logging.console
+    metric = cfg.tuning.metric
+    cv_folds = cfg.training.cv_folds
+    direction = cfg.tuning.direction
+    timeout = cfg.tuning.timeout
 
-    cv_params = _pipeline_fit_params(cat_features)
+    cv_params = pipeline_fit_params(cat_features)
 
     def objective(trial: optuna.Trial) -> float:
         params = params_fn(trial)
@@ -174,86 +176,78 @@ def optuna_tuning(
 
         pipeline = Pipeline(
             [
-                ("preprocessor", preprocessor(is_scale=is_scale, is_cat=is_cat)),
+                ("preprocessor", build_preprocessor(cfg, model_cfg, is_scale=is_scale, is_cat=is_cat)),
                 ("model", current_model),
             ]
         )
 
-        accuracy = cross_val_score(
+        score = cross_val_score(
             pipeline,
             X_train,
             y_train,
-            cv=5,
-            scoring="accuracy",
+            cv=cv_folds,
+            scoring=metric,
             params=cv_params,
         ).mean()
-        return accuracy
+        return score
 
-    start_optuna = time.time()
     study = optuna.create_study(direction=direction)
-    study.optimize(objective, n_trials=n_trials)
-    optuna_time = time.time() - start_optuna
+    optimizer_output = run_method(obj=study, method_name='optimize', stage='optuna', func=objective, n_trials=n_trials, timeout=timeout)
 
     best_params = study.best_trial.user_attrs.get("sklearn_params", study.best_params)
-    print(f"Best CV Accuracy: {study.best_value:.4f}")
-    print(f"Best parameters: {best_params}")
-    print(f"Optuna optimization time ({n_trials} trials): {optuna_time:.2f} s.")
-    print(f"Mean time per trial: {optuna_time / n_trials:.2f} s.")
+
+    log(f"Best CV {metric}: {study.best_value:.4f}", console)
+    log(f"Best parameters: {best_params}", console)
+    log(f"Optuna optimization time ({n_trials} trials): {optimizer_output['optuna_time_sec']:.2f} s.", console)
+    log(f"Mean time per trial: {optimizer_output['optuna_time_sec'] / max(n_trials, 1):.2f} s.", console)
 
     best_model = clone(model)
     best_model.set_params(**best_params)
 
     final_pipeline = Pipeline(
         [
-            ("preprocessor", preprocessor(is_scale, is_cat)),
+            ("preprocessor", build_preprocessor(cfg, model_cfg, is_scale, is_cat)),
             ("model", best_model),
         ]
     )
 
-    start_train = time.time()
-    final_pipeline.fit(X_train, y_train, **_pipeline_fit_params(cat_features))
-    train_time = time.time() - start_train
+    train_output = run_method(obj=final_pipeline, method_name='fit', stage='train', X=X_train, y=y_train, **pipeline_fit_params(cat_features))
 
-    start_predict = time.time()
-    pred = final_pipeline.predict(X_test)
-    predict_time = time.time() - start_predict
+    
+    pred_output = holdout_score(final_pipeline, X_test, y_test, metric)
+    
 
-    test_accuracy = accuracy_score(y_test, pred)
-
-    print(f"X_test Accuracy: {test_accuracy:.4f}")
-    print(f"Final pipeline's training: {train_time:.4f} s.")
-    print(f"X_test predictions ({len(X_test)} lines): {predict_time:.4f} s.")
+    log(f"Holdout {metric}: {pred_output['result']:.4f}", console)
+    log(f"Final pipeline's training: {train_output['train_time_sec']:.4f} s.", console)
+    log(f"Holdout predictions ({len(X_test)} lines): {pred_output['predict_time_sec']:.4f} s.", console)
 
     res = pipeline_return(
         final_pipeline,
         study.best_value,
-        tuning_time=optuna_time,
-        predict_time=predict_time,
+        tuning_time=optimizer_output['optuna_time_sec'],
+        predict_time=pred_output["predict_time_sec"],
         n_samples=len(X_test),
     )
 
-    experiment = add_result(res)
+    experiment = add_result(res, log_file_path=os.path.join(cfg.data.results_dir, "experiments.jsonl"))
 
     if logger is not None:
         logger.log_experiment(experiment)
 
     model_name = model.__class__.__name__
-    filename = f"models/{model_name}_optuna_acc_{study.best_value:.4f}.pkl"
-    joblib.dump(final_pipeline, filename)
+    filename = model_filename(cfg, model_name, "optuna", study.best_value)
 
-    if logger is not None:
-        logger.log_pipeline(filename)
+    if cfg.logging.save_model:
+        joblib.dump(final_pipeline, filename)
+        if logger is not None:
+            logger.log_pipeline(filename)
+        log(f"Pipeline saved as: {filename}", console)
 
-    print(f"Pipeline saved as: {filename}")
+    if cfg.logging.save_predictions and X_submit is not None:
+        submit_path = submission_output_path(cfg, model_name)
+        save_submission(final_pipeline, X_submit, submit_path)
 
     return study
-
-
-DEFAULT_SOLVER_MAPPING = {
-    "liblinear": ["l1", "l2"],
-    "saga": ["l1", "l2", "elasticnet"],
-    "lbfgs": ["l2"],
-}
 
 
 def logreg_optuna_params(
@@ -261,7 +255,7 @@ def logreg_optuna_params(
     solver_mapping: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Пространство поиска гиперпараметров LogisticRegression."""
-    mapping = solver_mapping or DEFAULT_SOLVER_MAPPING
+    mapping = solver_mapping
     solver = trial.suggest_categorical("solver", list(mapping.keys()))
     val = mapping[solver]
 
@@ -289,13 +283,6 @@ def logreg_optuna_params(
     return params
 
 
-logreg_grid_params = {
-    "model__C": [0.01, 0.1, 1.0, 10.0],
-    "model__penalty": ["l1", "l2"],
-    "model__solver": ["liblinear"]
-}
-
-
 def knn_optuna_params(trial: optuna.Trial) -> dict[str, Any]:
     """Пространство поиска гиперпараметров KNN."""
     return {
@@ -306,14 +293,6 @@ def knn_optuna_params(trial: optuna.Trial) -> dict[str, Any]:
             "metric", ["cosine", "manhattan", "euclidean"]
         ),
     }
-
-
-knn_grid_params = {
-    "model__n_neighbors": np.arange(3, 18, 2),
-    "model__weights": ["distance", "uniform"],
-    "model__leaf_size": [20, 30, 50],
-    "model__metric": ["cosine", "manhattan", "euclidean"],
-}
 
 
 def dt_optuna_params(trial: optuna.Trial) -> dict[str, Any]:
@@ -339,15 +318,6 @@ def dt_optuna_params(trial: optuna.Trial) -> dict[str, Any]:
             "min_impurity_decrease", 0.0, 0.01
         ),
     }
-
-
-dt_grid_params = {
-    "model__max_depth": [3, 5, 7],
-    "model__min_samples_split": [5, 20],
-    "model__min_samples_leaf": [2, 10],
-    "model__max_features": [None, "sqrt", "log2"],
-    "model__max_leaf_nodes": [None, 25, 50],
-}
 
 
 def rf_optuna_params(trial: optuna.Trial) -> dict[str, Any]:
@@ -376,15 +346,6 @@ def rf_optuna_params(trial: optuna.Trial) -> dict[str, Any]:
     }
 
 
-rf_grid_params = {
-    "model__n_estimators": [100, 300, 500],
-    "model__max_depth": [3, 5, 7],
-    "model__min_samples_split": [5, 20],
-    "model__min_samples_leaf": [2, 10],
-    "model__max_features": ["sqrt", "log2"],
-}
-
-
 def xgb_optuna_params(trial: optuna.Trial) -> dict[str, Any]:
     """Пространство поиска гиперпараметров XGBoost."""
     return {
@@ -398,19 +359,6 @@ def xgb_optuna_params(trial: optuna.Trial) -> dict[str, Any]:
         "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 0.8, step=0.05),
         "gamma": trial.suggest_float("gamma", 0.0, 0.3, step=0.05),
     }
-
-
-xgb_grid_params = {
-    "model__max_depth": np.arange(3, 6),
-    "model__n_estimators": np.linspace(100, 200, 3, dtype=int),
-    "model__learning_rate": np.logspace(np.log10(0.01), np.log10(0.1), 3),
-    "model__reg_lambda": np.logspace(np.log10(0.5), np.log10(5.0), 3),
-    "model__reg_alpha": np.logspace(np.log10(0.01), np.log10(2.0), 3),
-    "model__min_child_weight": np.linspace(1, 10, 3, dtype=int),
-    "model__subsample": np.arange(0.6, 0.81, 0.05),
-    "model__colsample_bytree": np.arange(0.6, 0.81, 0.05),
-    "model__gamma": np.arange(0.0, 0.31, 0.05),
-}
 
 
 def lgbm_optuna_params(trial: optuna.Trial) -> dict[str, Any]:
@@ -428,19 +376,6 @@ def lgbm_optuna_params(trial: optuna.Trial) -> dict[str, Any]:
     }
 
 
-lgbm_grid_params = {
-    "model__max_depth": np.arange(3, 6),
-    "model__n_estimators": np.linspace(100, 200, 3, dtype=int),
-    "model__learning_rate": np.logspace(np.log10(0.01), np.log10(0.1), 3),
-    "model__reg_lambda": np.logspace(np.log10(0.5), np.log10(5.0), 3),
-    "model__reg_alpha": np.logspace(np.log10(0.01), np.log10(2.0), 3),
-    "model__min_child_weight": np.linspace(1, 10, 3, dtype=int),
-    "model__subsample": np.arange(0.6, 0.81, 0.05),
-    "model__colsample_bytree": np.arange(0.6, 0.81, 0.05),
-    "model__min_split_gain": np.arange(0.0, 0.31, 0.05),
-}
-
-
 def catboost_optuna_params(trial: optuna.Trial) -> dict[str, Any]:
     """Пространство поиска гиперпараметров CatBoost."""
     return {
@@ -451,13 +386,3 @@ def catboost_optuna_params(trial: optuna.Trial) -> dict[str, Any]:
         "subsample": trial.suggest_float("subsample", 0.5, 0.8),
         "rsm": trial.suggest_float("rsm", 0.5, 0.8),
     }
-
-
-catboost_grid_params = {
-    "model__iterations": np.linspace(100, 200, 3, dtype=int),
-    "model__learning_rate": np.logspace(np.log10(0.001), np.log10(0.1), 3),
-    "model__depth": np.arange(3, 7),
-    "model__l2_leaf_reg": np.linspace(3.0, 5.0, 3),
-    "model__subsample": np.linspace(0.5, 0.8, 3),
-    "model__rsm": np.linspace(0.5, 0.8, 3),
-}

@@ -8,7 +8,7 @@ from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.pipeline import Pipeline
 
-from utils import add_result, pipeline_return, preprocessor
+from utils import add_result, build_preprocessor, pipeline_return
 
 
 def logistic_kfold(
@@ -49,7 +49,7 @@ def logistic_kfold(
     verbose = params.verbose
     n_splits = training.cv_folds
     shuffle = training.shuffle
-    scoring = params.scoring
+    scoring = params.get("scoring", "accuracy")
 
     skf = StratifiedKFold(n_splits=n_splits, random_state=random_state, shuffle=shuffle)
 
@@ -69,10 +69,11 @@ def logistic_kfold(
         [
             (
                 "preprocessor",
-                preprocessor(
-                    is_scale=cfg.preprocessing.scale_numeric,
-                    is_cat=cfg.preprocessing.encode_categorical,
-                    scaler_type=cfg.preprocessing.scaler_type,
+                build_preprocessor(
+                    cfg,
+                    params,
+                    is_scale=params.is_scale,
+                    is_cat=params.is_cat,
                 ),
             ),
             ("model", model),
@@ -152,20 +153,21 @@ def log_reg_cv(
         max_iter=params.max_iter,
         solver=params.solver,
         cv=training.cv_folds,
-        refit=params.refit,
-        Cs=params.Cs,
+        refit=params.get("refit", True),
+        Cs=params.get("Cs", 10),
         verbose=params.verbose,
-        scoring=params.scoring,
+        scoring=params.get("scoring", "accuracy"),
     )
 
     pipeline_cv = Pipeline(
         [
             (
                 "preprocessor",
-                preprocessor(
-                    is_scale=cfg.preprocessing.scale_numeric,
-                    is_cat=cfg.preprocessing.encode_categorical,
-                    scaler_type=cfg.preprocessing.scaler_type,
+                build_preprocessor(
+                    cfg,
+                    params,
+                    is_scale=params.is_scale,
+                    is_cat=params.is_cat,
                 ),
             ),
             ("model", model_cv),

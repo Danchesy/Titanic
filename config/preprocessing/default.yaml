@@ -1,11 +1,16 @@
+defaults:
+  - encoder: null
+  - scaler: null
+  - _self_
+
 drop_columns:
   - PassengerId
   - Name
   - Ticket
   - Cabin
 
-scale_numeric: true
+q_num: 4
 
-scaler_type: StandardScaler  # StandardScaler | MinMaxScaler
+scale_numeric: true
 
 encode_categorical: true

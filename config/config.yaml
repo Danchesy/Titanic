@@ -4,6 +4,7 @@ defaults:
   - preprocessing: default
   - tuning: default
   - logging: default
+  - solver: mapping
   - model@model.linear_model: linear_model
   - model@model.knn: knn
   - model@model.dt: dt
@@ -11,6 +12,7 @@ defaults:
   - model@model.xgboost: xgboost
   - model@model.lightgbm: lightgbm
   - model@model.catboost: catboost
+  - model@model.nn_model: nn_model
   - _self_
 
 experiment_name: Titanic

@@ -1,11 +1,11 @@
-train_path: data/train.csv
+train_path: dataset/train.csv
 
-test_path: data/test.csv
+test_path: dataset/test.csv
 
-submission_path: data/gender_submission.csv
+submission_path: submissions/
 
 models_dir: models
 
 results_dir: results
 
-reports_dir: reports
+# reports_dir: reports

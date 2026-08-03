@@ -1,3 +1,8 @@
+defaults:
+  - /preprocessing/encoder@encoder: null
+  - /preprocessing/scaler@scaler: null
+  - _self_
+
 _target_: catboost.CatBoostClassifier
 
 iterations: 300

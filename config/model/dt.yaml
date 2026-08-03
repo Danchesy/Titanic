@@ -1,3 +1,8 @@
+defaults:
+  - /preprocessing/encoder@encoder: ordinal
+  - /preprocessing/scaler@scaler: null
+  - _self_
+
 _target_: sklearn.tree.DecisionTreeClassifier
 
 criterion: gini

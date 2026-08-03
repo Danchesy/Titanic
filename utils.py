@@ -1,8 +1,11 @@
 import json
 import os
 import random
+import time
+from functools import wraps
 from typing import Any
 
+import hydra
 import joblib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,19 +16,31 @@ import wandb
 from omegaconf import DictConfig, OmegaConf
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
+from sklearn.metrics import get_scorer
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 __all__ = [
     "FeatureEngineer",
     "WandbLogger",
     "add_result",
+    "build_preprocessor",
     "data_loading",
+    "ensure_dirs",
+    "generate_submission",
+    "holdout_score",
+    "log",
+    "model_filename",
+    "pipeline_fit_params",
     "pipeline_return",
     "plot_feature_importance",
     "preprocessor",
-    "set_seed"
+    "run_method",
+    "save_submission",
+    "set_seed",
+    "submission_output_path",
+    "time_and_score",
 ]
 
 
@@ -48,18 +63,24 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         cat_cols (List[str]): Список категориальных колонок
     """
 
-    def __init__(self, q_num: int = 4):
+    def __init__(self, q_num: int = 4, drop_columns: list[str] | None = None):
         """
         Инициализация FeatureEngineer.
 
         Args:
             q_num: Количество категорий для дискретизации стоимости билета
+            drop_columns: Дополнительные колонки для удаления после FE
         """
         self.q_num: int = q_num
         self.embarked_mode_: str = "S"
         self.ini_to_age_: dict[str, float] = {}
         self.bins_: np.ndarray | None = None
         self.cat_cols: list[str] = ["Pclass", "Embarked", "Fare_cat", "Initial", "Male"]
+        self.drop_columns: list[str] = (
+            drop_columns
+            if drop_columns is not None
+            else ["PassengerId", "Name", "Ticket", "Cabin"]
+        )
 
     def fit(self, X: pd.DataFrame, y: pd.Series | None = None) -> "FeatureEngineer":
         """
@@ -130,8 +151,11 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         X["Child"] = np.where(X["Age"] <= 5, 1, 0)
 
         # Drop useless features
+        cols_to_drop = list(
+            set(self.drop_columns + ["Sex", "Fare", "Name", "Ticket", "Cabin"])
+        )
         X.drop(
-            columns=["Sex", "Name", "Ticket", "Cabin", "Fare"],
+            columns=cols_to_drop,
             axis=1,
             inplace=True,
             errors="ignore",
@@ -156,6 +180,7 @@ class WandbLogger:
             project=cfg.logging.wandb.project,
             entity=cfg.logging.wandb.entity,
             tags=cfg.logging.wandb.tags,
+            name=cfg.experiment_name,
             config=OmegaConf.to_container(cfg, resolve=True),
         )
 
@@ -195,6 +220,24 @@ class WandbLogger:
         """Завершает текущий run."""
         if self.enabled:
             wandb.finish()
+
+def time_and_score(stage='train'):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+
+            final_stage = kwargs.pop('stage', stage)
+
+            start_train = time.time()
+            result = func(*args, **kwargs)
+            timer = time.time() - start_train
+
+            return {
+                "result": result,
+                f"{final_stage}_time_sec": timer
+            }
+        return wrapper
+    return decorator
 
 
 def set_seed(seed: int = 42) -> None:
@@ -238,7 +281,10 @@ def data_loading(
 def preprocessor(
     is_scale: bool = True,
     is_cat: bool = True,
-    scaler_type: str = "StandardScaler",
+    scaler: BaseEstimator | None = None,
+    encoder: BaseEstimator | None = None,
+    drop_columns: list[str] | None = None,
+    q_num: int = 4,
 ) -> Pipeline:
     """
     Создает пайплайн предобработки данных с возможностью масштабирования и кодирования.
@@ -246,7 +292,10 @@ def preprocessor(
     Args:
         is_scale: Флаг, определяющий необходимость масштабирования числовых признаков
         is_cat: Флаг, определяющий необходимость кодирования категориальных признаков
-        scaler_type: Тип скейлера ("StandardScaler" или "MinMaxScaler")
+        scaler: Экземпляр sklearn-скейлера (StandardScaler, MinMaxScaler и т.д.)
+        encoder: Экземпляр sklearn-энкодера (OneHotEncoder, OrdinalEncoder и т.д.)
+        drop_columns: Колонки для удаления в FeatureEngineer
+        q_num: Число категорий для дискретизации Fare
 
     Returns:
         Pipeline: Пайплайн предобработки данных
@@ -255,35 +304,28 @@ def preprocessor(
     num_columns = ["Age", "SibSp", "Parch"]
     transformers = []
 
+    feature_engineer = FeatureEngineer(q_num=q_num, drop_columns=drop_columns)
+
     if not is_cat and not is_scale:
-        return FeatureEngineer()  # type: ignore
+        return feature_engineer  # type: ignore[return-value]
 
     if is_cat:
-        transformers.append(
-            (
-                "cat",
-                OneHotEncoder(sparse_output=False, handle_unknown="ignore"),
-                cat_columns,
-            )
-        )
+        if encoder is None:
+            encoder = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
+        transformers.append(("cat", encoder, cat_columns))
 
     if is_scale:
-        if scaler_type == "StandardScaler":
+        if scaler is None:
             scaler = StandardScaler()
-        elif scaler_type == "MinMaxScaler":
-            scaler = MinMaxScaler()
-        else:
-            raise ValueError(f"Unsupported scaler: {scaler_type}")
-
         transformers.append(("num", scaler, num_columns))
 
     if not transformers:
-        return Pipeline([("feature_engineering", FeatureEngineer())])
+        return Pipeline([("feature_engineering", feature_engineer)])
 
     cols_trans = ColumnTransformer(transformers, remainder="passthrough")
 
     pipeline = Pipeline(
-        [("feature_engineering", FeatureEngineer()), ("cols_transformer", cols_trans)]
+        [("feature_engineering", feature_engineer), ("cols_transformer", cols_trans)]
     )
 
     return pipeline
@@ -375,10 +417,60 @@ def add_result(
     return experiment_data
 
 
+def build_preprocessor(
+    cfg: DictConfig,
+    model_cfg: DictConfig,
+    is_scale: bool,
+    is_cat: bool,
+) -> Pipeline:
+    """Создаёт preprocessor с параметрами из конфига модели или глобального preprocessing."""
+    drop_columns = OmegaConf.to_container(cfg.preprocessing.drop_columns, resolve=True)
+
+    scaler = None
+    encoder = None
+
+    if is_scale:
+        scaler_cfg = model_cfg.get("scaler") or cfg.preprocessing.get("scaler")
+        if scaler_cfg is None:
+            raise ValueError("scaler config is required when is_scale=True")
+        scaler = hydra.utils.instantiate(scaler_cfg)
+
+    if is_cat:
+        encoder_cfg = model_cfg.get("encoder") or cfg.preprocessing.get("encoder")
+        if encoder_cfg is None:
+            raise ValueError("encoder config is required when is_cat=True")
+        encoder = hydra.utils.instantiate(encoder_cfg)
+
+    return preprocessor(
+        is_scale=is_scale,
+        is_cat=is_cat,
+        scaler=scaler,
+        encoder=encoder,
+        drop_columns=list(drop_columns),
+        q_num=cfg.preprocessing.q_num,
+    )
+
+
+def save_submission(
+    pipeline: Pipeline,
+    X_submit: pd.DataFrame,
+    submission_path: str,
+) -> None:
+    """Сохраняет предсказания в CSV для Kaggle."""
+    os.makedirs(os.path.dirname(submission_path) or ".", exist_ok=True)
+    preds = pipeline.predict(X_submit)
+    submission = pd.DataFrame(
+        {"PassengerId": X_submit.index, "Survived": preds.astype(int)}
+    )
+    submission.to_csv(submission_path, index=False)
+    print(f"Submission saved: {submission_path}")
+
+
 def plot_feature_importance(
     model: Any,
     feature_names: list[str],
     top_n: int = 20,
+    save_path: str | None = None,
 ) -> None:
     """
     Визуализирует важность признаков для моделей с атрибутом feature_importances_.
@@ -387,6 +479,7 @@ def plot_feature_importance(
         model: Обученная модель с атрибутом feature_importances_
         feature_names: Список названий признаков
         top_n: Количество наиболее важных признаков для отображения
+        save_path: Путь для сохранения графика (если None — только show)
     """
     importances = model.feature_importances_
 
@@ -412,24 +505,73 @@ def plot_feature_importance(
     plt.xlabel("Importance Score")
     plt.ylabel("Features")
     plt.tight_layout()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+        plt.savefig(save_path, bbox_inches="tight")
+        print(f"Feature importance plot saved: {save_path}")
     plt.show()
 
 
 def generate_submission(
-    pipeline_path: str = "models/full_pipeline.pkl",
-    output_path: str = "data/submission.csv",
+    cfg: DictConfig,
+    pipeline_path: str | None = None,
+    output_path: str | None = None,
 ) -> None:
     """Генерирует файл сабмита из сохранённого пайплайна."""
+    pipeline_path = pipeline_path or f"{cfg.data.models_dir}/full_pipeline.pkl"
+    output_path = output_path or os.path.join(cfg.data.results_dir, "submission.csv")
+
     pipeline = joblib.load(pipeline_path)
+    *_, test = data_loading(cfg)
+    save_submission(pipeline, test, output_path)
 
-    *_, test = data_loading()
 
-    preds = pipeline.predict(test)
+def log(message: str, console: bool) -> None:
+    if console:
+        print(message)
 
-    submission = pd.DataFrame({
-        'PassengerId': test.index,
-        'Survived': preds.astype(int)
-    })
 
-    submission.to_csv(output_path, index=False)
-    print(f"Submit created successfully and saved as {output_path}")
+def pipeline_fit_params(cat_features: list[str] | None) -> dict[str, Any]:
+    """Параметры fit для CatBoost: cat_features нельзя задавать в __init__ (ломает CV clone)."""
+    if not cat_features:
+        return {}
+    return {"model__cat_features": list(cat_features)}
+
+
+def ensure_dirs(cfg: DictConfig) -> None:
+    os.makedirs(cfg.data.models_dir, exist_ok=True)
+    os.makedirs(cfg.data.results_dir, exist_ok=True)
+    # os.makedirs(cfg.data.reports_dir, exist_ok=True)
+
+
+def model_filename(
+    cfg: DictConfig,
+    model_name: str,
+    method: str,
+    score: float,
+    extension: str = 'pkl',
+) -> str:
+    prefix = f"{cfg.experiment_name}_" if cfg.get("experiment_name") else ""
+    return os.path.join(
+        cfg.data.models_dir,
+        f"{prefix}{model_name}_{method}_{score:.4f}.{extension}",
+    )
+
+
+@time_and_score(stage='predict')
+def holdout_score(pipeline: Pipeline, X: pd.DataFrame, y: pd.Series, metric: str) -> float:
+    scorer = get_scorer(metric)
+    return float(scorer(pipeline, X, y))
+
+
+@time_and_score()
+def run_method(obj, method_name, *args, **kwargs):
+    method = getattr(obj, method_name) if obj is not None else globals()[method_name]
+    res = method(*args, **kwargs)
+
+    return res
+
+
+def submission_output_path(cfg: DictConfig, model_name: str) -> str:
+    submit_dir = os.path.dirname(cfg.data.submission_path) or cfg.data.results_dir
+    return os.path.join(submit_dir, f"{model_name}_submission.csv")

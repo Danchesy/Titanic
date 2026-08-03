@@ -1,3 +1,8 @@
+defaults:
+  - /preprocessing/encoder@encoder: ordinal
+  - /preprocessing/scaler@scaler: standard
+  - _self_
+
 _target_: xgboost.XGBClassifier
 
 n_estimators: 300
@@ -5,10 +10,6 @@ n_estimators: 300
 max_depth: 4
 
 learning_rate: 0.05
-
-eval_metric: logloss
-
-use_label_encoder: false
 
 random_state: ${seed}
 

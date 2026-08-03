@@ -1,3 +1,8 @@
+defaults:
+  - /preprocessing/scaler@scaler: standard
+  - /preprocessing/encoder@encoder: ohe
+  - _self_
+
 _target_: sklearn.neighbors.KNeighborsClassifier
 
 n_neighbors: 5
