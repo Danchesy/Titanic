@@ -1,13 +1,15 @@
 import warnings
 from functools import partial
+from logging import WandbLogger
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
 from leaderboard import *
 from nn_model import nn_model
+from preprocessing import data_loading
 from tuning_params import *
-from utils import WandbLogger, data_loading, set_seed
+from utils import set_seed
 
 warnings.filterwarnings("ignore")
 

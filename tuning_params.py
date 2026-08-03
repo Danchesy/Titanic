@@ -1,5 +1,6 @@
 import os
 from collections.abc import Callable
+from logging import _log, add_result
 from typing import Any
 
 import hydra
@@ -11,7 +12,16 @@ from sklearn.base import clone
 from sklearn.model_selection import GridSearchCV, cross_val_score
 from sklearn.pipeline import Pipeline
 
-from utils import *
+from preprocessing import build_preprocessor, pipeline_fit_params
+from utils import (
+    ensure_dirs,
+    holdout_score,
+    model_filename,
+    pipeline_return,
+    run_method,
+    save_submission,
+    submission_output_path,
+)
 
 __all__ = [
     "catboost_optuna_params",
@@ -83,17 +93,17 @@ def grid_tuning(
 
     train_output = run_method(obj=grid_search, method_name='fit', stage='train', X=X_train, y=y_train, **pipeline_fit_params(cat_features))
 
-    log(f"Best parameters: {grid_search.best_params_}", console)
-    log(f"Best CV {metric}: {grid_search.best_score_:.4f}", console)
-    log(f"GridSearch trainig time: {train_output['train_time_sec']:.2f} s.", console)
+    _log(f"Best parameters: {grid_search.best_params_}", console)
+    _log(f"Best CV {metric}: {grid_search.best_score_:.4f}", console)
+    _log(f"GridSearch trainig time: {train_output['train_time_sec']:.2f} s.", console)
 
     best_pipeline = grid_search.best_estimator_
 
     pred_output = holdout_score(pipeline=best_pipeline, X=X_test, y=y_test, metric=metric)
 
-    log(f"Holdout {metric}: {pred_output['result']:.4f}", console)
-    log(f"Holdout predict ({len(X_test)} lines): {pred_output['result']:.4f} s.", console)
-    log(f"Latency: {(pred_output['predict_time_sec'] / len(X_test)) * 1000:.4f} ms", console)
+    _log(f"Holdout {metric}: {pred_output['result']:.4f}", console)
+    _log(f"Holdout predict ({len(X_test)} lines): {pred_output['result']:.4f} s.", console)
+    _log(f"Latency: {(pred_output['predict_time_sec'] / len(X_test)) * 1000:.4f} ms", console)
 
     y_pred_holdout = best_pipeline.predict(X_test)
     
@@ -104,7 +114,7 @@ def grid_tuning(
         score = metric_fn(y_test, y_pred_holdout)
         metric_to_score[name] = float(score)
         
-        log(f"Holdout {name}: {score:.4f}", console)
+        _log(f"Holdout {name}: {score:.4f}", console)
 
     res = pipeline_return(
         best_pipeline,
@@ -128,7 +138,7 @@ def grid_tuning(
         joblib.dump(best_pipeline, filename)
         if logger is not None:
             logger.log_pipeline(filename)
-        log(f"Pipeline saved as: {filename}", console)
+        _log(f"Pipeline saved as: {filename}", console)
 
     if cfg.logging.save_predictions and X_submit is not None:
         submit_path = submission_output_path(cfg, model_name)
@@ -207,10 +217,10 @@ def optuna_tuning(
 
     best_params = study.best_trial.user_attrs.get("sklearn_params", study.best_params)
 
-    log(f"Best CV {metric}: {study.best_value:.4f}", console)
-    log(f"Best parameters: {best_params}", console)
-    log(f"Optuna optimization time ({n_trials} trials): {optimizer_output['optuna_time_sec']:.2f} s.", console)
-    log(f"Mean time per trial: {optimizer_output['optuna_time_sec'] / max(n_trials, 1):.2f} s.", console)
+    _log(f"Best CV {metric}: {study.best_value:.4f}", console)
+    _log(f"Best parameters: {best_params}", console)
+    _log(f"Optuna optimization time ({n_trials} trials): {optimizer_output['optuna_time_sec']:.2f} s.", console)
+    _log(f"Mean time per trial: {optimizer_output['optuna_time_sec'] / max(n_trials, 1):.2f} s.", console)
 
     best_model = clone(model)
     best_model.set_params(**best_params)
@@ -228,9 +238,9 @@ def optuna_tuning(
     pred_output = holdout_score(final_pipeline, X_test, y_test, metric)
     
 
-    log(f"Holdout {metric}: {pred_output['result']:.4f}", console)
-    log(f"Final pipeline's training: {train_output['train_time_sec']:.4f} s.", console)
-    log(f"Holdout predictions ({len(X_test)} lines): {pred_output['predict_time_sec']:.4f} s.", console)
+    _log(f"Holdout {metric}: {pred_output['result']:.4f}", console)
+    _log(f"Final pipeline's training: {train_output['train_time_sec']:.4f} s.", console)
+    _log(f"Holdout predictions ({len(X_test)} lines): {pred_output['predict_time_sec']:.4f} s.", console)
 
     y_pred_holdout = final_pipeline.predict(X_test)
     
@@ -241,7 +251,7 @@ def optuna_tuning(
         score = metric_fn(y_test, y_pred_holdout)
         metric_to_score[name] = float(score)
         
-        log(f"Holdout {name}: {score:.4f}", console)
+        _log(f"Holdout {name}: {score:.4f}", console)
 
     res = pipeline_return(
         final_pipeline,
@@ -265,7 +275,7 @@ def optuna_tuning(
         joblib.dump(final_pipeline, filename)
         if logger is not None:
             logger.log_pipeline(filename)
-        log(f"Pipeline saved as: {filename}", console)
+        _log(f"Pipeline saved as: {filename}", console)
 
     if cfg.logging.save_predictions and X_submit is not None:
         submit_path = submission_output_path(cfg, model_name)

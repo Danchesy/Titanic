@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from logging import _log
 
 import hydra
 import numpy as np
@@ -11,7 +12,8 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from utils import build_preprocessor, log, model_filename, run_method
+from preprocessing import build_preprocessor
+from utils import model_filename, run_method
 
 
 class Tokenizer(BaseEstimator, TransformerMixin):
@@ -132,7 +134,7 @@ def save_nn_submission(
     )
     submission.to_csv(submission_path, index=False)
 
-    log(f"Submission saved: {submission_path}", cfg.logging.console)
+    _log(f"Submission saved: {submission_path}", cfg.logging.console)
     return submission_path
 
 
@@ -262,17 +264,17 @@ def nn_train_pipeline(X_train, y_train, X_val, y_val, cfg, logger=None):
 
             if logger is not None:
                 logger.log_pipeline(filename)
-            log(f"Model states saved as: {filename}", console)
+            _log(f"Model states saved as: {filename}", console)
         else: 
             patience_counter += 1
 
         scheduler.step(val_loss)
 
         if patience_counter >= patience:
-            log(f"Early stopping triggered at epoch {epoch+1}", console)
+            _log(f"Early stopping triggered at epoch {epoch+1}", console)
             break
 
-        log(f'Epoch {epoch+1}/{epochs}, '
+        _log(f'Epoch {epoch+1}/{epochs}, '
         f"Loss: {avg_train_loss:.4f}, "
         f"Val Loss: {val_loss.item():.4f}, "
         f"Val Accuracy: {metrics['accuracy']:.4f}", console)
@@ -377,4 +379,4 @@ def nn_model(X_train, y_train, X_val, y_val, X_submit, cfg, logger=None):
             preproc=preproc,
             submission_name="Titanic_NN_Model"
         )
-        log(f"Submission saved: {submission_path}", cfg.logging.console)
+        _log(f"Submission saved: {submission_path}", cfg.logging.console)
