@@ -158,14 +158,28 @@ def nn_train_epoch(model, train_loader, loss_fn, optimizer, max_grad_norm=None):
     return epoch_loss / len(train_loader)
 
 
-def nn_eval(model, loss_fn, X_val, X_val_name_tensor, y_val):
+def nn_eval(model, loss_fn, X_val, X_val_name_tensor, y_val, methods):
     model.eval()
+
+    metric_to_score = {}
+
     with torch.no_grad():
         val_outputs = model(X_val, X_val_name_tensor)
         val_loss = loss_fn(val_outputs.squeeze(), y_val)
-        val_accuracy = ((val_outputs.squeeze() > 0.5).float() == y_val).float().mean()
 
-    return val_loss, val_accuracy    
+        metric_to_score = {}
+        for name, metric_cfg in methods.items():
+            metric = hydra.utils.instantiate(metric_cfg)
+
+            y_pred = (val_outputs.squeeze() > 0.5).float()
+            metric_score = metric(y_pred, y_val)
+            
+            if torch.is_tensor(metric_score):
+                metric_score = metric_score.item()
+                
+            metric_to_score[name] = metric_score
+
+    return val_loss, metric_to_score
 
 
 def nn_train_pipeline(X_train, y_train, X_val, y_val, cfg, logger=None): 
@@ -220,20 +234,26 @@ def nn_train_pipeline(X_train, y_train, X_val, y_val, cfg, logger=None):
 
     for epoch in range(epochs):
         avg_train_loss = nn_train_epoch(model=model, train_loader=train_loader, loss_fn=loss_fn, optimizer=optimizer)
-        val_loss, val_accuracy = nn_eval(model, loss_fn=loss_fn, X_val=X_val_tab, X_val_name_tensor=X_val_name_tensor, y_val=y_val_tensor)
+        val_loss, metrics = nn_eval(
+                                model, 
+                                loss_fn=loss_fn, 
+                                X_val=X_val_tab, 
+                                X_val_name_tensor=X_val_name_tensor, 
+                                y_val=y_val_tensor, 
+                                methods=OmegaConf.to_container(cfg.model.nn_model.metrics, resolve=True))
 
         if val_loss.item() < best_loss - cfg.model.nn_model.min_delta:
             best_loss = val_loss.item()
             patience_counter = 0
 
             model_name = model.__class__.__name__
-            filename = model_filename(cfg, model_name, "states", val_accuracy, extension='pt')
+            filename = model_filename(cfg, model_name, "states", metrics['accuracy'], extension='pt')
             checkpoint = {
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
                 'epoch': epoch,
-                'val_accuracy': val_accuracy, 
+                'val_accuracy': metrics['accuracy'], 
                 'tokenizer_vocab': tok.vocab,
                 'tokenizer_max_seq_len': tok.max_seq_len,
             }
@@ -253,9 +273,9 @@ def nn_train_pipeline(X_train, y_train, X_val, y_val, cfg, logger=None):
             break
 
         log(f'Epoch {epoch+1}/{epochs}, '
-        f'Loss: {avg_train_loss:.4f}, '
-        f'Val Loss: {val_loss.item():.4f}, '
-        f'Val Accuracy: {val_accuracy.item():.4f}', console)
+        f"Loss: {avg_train_loss:.4f}, "
+        f"Val Loss: {val_loss.item():.4f}, "
+        f"Val Accuracy: {metrics['accuracy']:.4f}", console)
 
     return {
         "model": model, 
@@ -268,7 +288,7 @@ def nn_train_pipeline(X_train, y_train, X_val, y_val, cfg, logger=None):
 
 
 def add_nn_res(
-    accuracy,
+    metric_to_score,
     loss,
     predict_time,
     latency_ms,
@@ -278,7 +298,10 @@ def add_nn_res(
 
     experiment_data = {
         "model": 'NN_Model',
-        "accuracy": accuracy,
+        "accuracy": metric_to_score.get('accuracy', None),
+        "f1_score": metric_to_score.get('f1_score', None),
+        "precision": metric_to_score.get('precision', None),
+        "recall": metric_to_score.get('recall', None),
         "loss": loss,
         "hyperparams": OmegaConf.to_container(model_cfg, resolve=True),
         "predict_time_sec": predict_time,
@@ -288,7 +311,6 @@ def add_nn_res(
     if results is not None:
         results.append(experiment_data)
 
-    # Дописываем в файл ('a' — append)
     # JSON Lines (один эксперимент — одна строчка в файле)
     if log_file_path:
         with open(log_file_path, mode="a", encoding="utf-8") as f:
@@ -328,16 +350,17 @@ def nn_model(X_train, y_train, X_val, y_val, X_submit, cfg, logger=None):
         loss_fn=loss_fn,
         X_val=X_val_tab,
         X_val_name_tensor=X_val_name_tensor,
-        y_val=y_val_tensor
+        y_val=y_val_tensor,
+        methods=OmegaConf.to_container(cfg.model.nn_model.metrics, resolve=True),
     )
 
-    val_loss, val_accuracy = eval_output["result"]
+    val_loss, metrics = eval_output["result"]
     predict_time = eval_output["nn_predict_time_sec"]
     num_samples = X_val_tab.shape[0]
     latency_ms_per_sample = (predict_time * 1000) / num_samples
 
     add_nn_res(
-        accuracy=val_accuracy.item(),
+        metric_to_score=metrics,
         loss=val_loss.item(),
         predict_time=predict_time,
         latency_ms=latency_ms_per_sample,

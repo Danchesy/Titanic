@@ -4,18 +4,9 @@ from functools import partial
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
+from leaderboard import *
 from nn_model import nn_model
-from tuning_params import (
-    catboost_optuna_params,
-    dt_optuna_params,
-    grid_tuning,
-    knn_optuna_params,
-    lgbm_optuna_params,
-    logreg_optuna_params,
-    optuna_tuning,
-    rf_optuna_params,
-    xgb_optuna_params,
-)
+from tuning_params import *
 from utils import WandbLogger, data_loading, set_seed
 
 warnings.filterwarnings("ignore")
@@ -102,6 +93,7 @@ def main(cfg: DictConfig) -> None:
                 y_val,
                 cfg,
                 model_cfg,
+                methods=cfg.tuning.metrics,
                 is_scale=is_scale,
                 is_cat=is_cat,
                 cat_features=cat_features,
@@ -119,6 +111,7 @@ def main(cfg: DictConfig) -> None:
                 y_val,
                 cfg,
                 model_cfg,
+                methods=cfg.tuning.metrics,
                 n_trials=cfg.tuning.n_trials,
                 is_scale=is_scale,
                 is_cat=is_cat,
@@ -129,6 +122,14 @@ def main(cfg: DictConfig) -> None:
 
     # ensemble
     
+    
+    table = (
+        load_leaderboard("results/experiments.jsonl")
+        .pipe(build_leaderboard_table)
+        .pipe(leaderboard_to_markdown)
+    )
+
+    update_readme_leaderboard("README.md", table)
 
     logger.finish()
     if cfg.logging.console:

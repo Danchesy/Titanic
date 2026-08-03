@@ -2,6 +2,7 @@ import os
 from collections.abc import Callable
 from typing import Any
 
+import hydra
 import joblib
 import optuna
 import pandas as pd
@@ -13,20 +14,14 @@ from sklearn.pipeline import Pipeline
 from utils import *
 
 __all__ = [
-    "catboost_grid_params",
     "catboost_optuna_params",
-    "dt_grid_params",
     "dt_optuna_params",
     "grid_tuning",
-    "knn_grid_params",
     "knn_optuna_params",
-    "lgbm_grid_params",
     "lgbm_optuna_params",
     "logreg_optuna_params",
     "optuna_tuning",
-    "rf_grid_params",
     "rf_optuna_params",
-    "xgb_grid_params",
     "xgb_optuna_params",
 ]
 
@@ -40,6 +35,7 @@ def grid_tuning(
     y_test: pd.Series,
     cfg: DictConfig,
     model_cfg: DictConfig,
+    methods: dict[str, Any],
     is_scale: bool = True,
     is_cat: bool = True,
     cat_features: list[str] | None = None,
@@ -93,11 +89,22 @@ def grid_tuning(
 
     best_pipeline = grid_search.best_estimator_
 
-    pred_output = holdout_score(pipeline=best_pipeline, X=X_test, y=y_test, metric=metric, method_name='fit', stage='train')
+    pred_output = holdout_score(pipeline=best_pipeline, X=X_test, y=y_test, metric=metric)
 
     log(f"Holdout {metric}: {pred_output['result']:.4f}", console)
     log(f"Holdout predict ({len(X_test)} lines): {pred_output['result']:.4f} s.", console)
     log(f"Latency: {(pred_output['predict_time_sec'] / len(X_test)) * 1000:.4f} ms", console)
+
+    y_pred_holdout = best_pipeline.predict(X_test)
+    
+    metric_to_score = {}
+    for name, metric_cfg in methods.items():
+        metric_fn = hydra.utils.instantiate(metric_cfg)
+        
+        score = metric_fn(y_test, y_pred_holdout)
+        metric_to_score[name] = float(score)
+        
+        log(f"Holdout {name}: {score:.4f}", console)
 
     res = pipeline_return(
         best_pipeline,
@@ -106,6 +113,9 @@ def grid_tuning(
         predict_time=pred_output["predict_time_sec"],
         n_samples=len(X_test),
     )
+
+    res.update(metric_to_score)
+
     experiment = add_result(res, log_file_path=os.path.join(cfg.data.results_dir, "experiments.jsonl"))
 
     if logger is not None:
@@ -136,6 +146,7 @@ def optuna_tuning(
     y_test: pd.Series,
     cfg: DictConfig,
     model_cfg: DictConfig,
+    methods: dict[str, Any],
     n_trials: int = 20,
     is_scale: bool = True,
     is_cat: bool = True,
@@ -221,6 +232,17 @@ def optuna_tuning(
     log(f"Final pipeline's training: {train_output['train_time_sec']:.4f} s.", console)
     log(f"Holdout predictions ({len(X_test)} lines): {pred_output['predict_time_sec']:.4f} s.", console)
 
+    y_pred_holdout = final_pipeline.predict(X_test)
+    
+    metric_to_score = {}
+    for name, metric_cfg in methods.items():
+        metric_fn = hydra.utils.instantiate(metric_cfg)
+        
+        score = metric_fn(y_test, y_pred_holdout)
+        metric_to_score[name] = float(score)
+        
+        log(f"Holdout {name}: {score:.4f}", console)
+
     res = pipeline_return(
         final_pipeline,
         study.best_value,
@@ -228,6 +250,8 @@ def optuna_tuning(
         predict_time=pred_output["predict_time_sec"],
         n_samples=len(X_test),
     )
+
+    res.update(metric_to_score)
 
     experiment = add_result(res, log_file_path=os.path.join(cfg.data.results_dir, "experiments.jsonl"))
 

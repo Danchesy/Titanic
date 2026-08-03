@@ -11,3 +11,17 @@ metric: f1
 use_optuna: true
 
 use_grid_search: false
+
+metrics:
+  accuracy:
+    _target_: sklearn.metrics.accuracy_score
+    _partial_: true
+  f1_score:
+    _target_: sklearn.metrics.f1_score
+    _partial_: true
+  precision:
+    _target_: sklearn.metrics.precision_score
+    _partial_: true
+  recall:
+    _target_: sklearn.metrics.recall_score
+    _partial_: true

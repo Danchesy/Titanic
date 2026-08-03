@@ -32,7 +32,7 @@ is_cat: ${preprocessing.encode_categorical}
 is_scale: ${preprocessing.scale_numeric}
 
 grid_params:
-  model__C: [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+  model__C: [0.001, 0.01, 0.1]
   model__penalty: ["l1", "l2"]
   model__solver: ["liblinear"]
   model__fit_intercept: [true, false]

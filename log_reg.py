@@ -33,7 +33,6 @@ def logistic_kfold(
     Returns:
         Dict[str, Any]: Словарь с результатами
     """
-    # Извлекаем параметры из конфига
     params = cfg.model.linear_model
     training = cfg.training
     determinism = cfg

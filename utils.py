@@ -12,7 +12,6 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import torch
-import wandb
 from omegaconf import DictConfig, OmegaConf
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
@@ -20,6 +19,8 @@ from sklearn.metrics import get_scorer
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+import wandb
 
 __all__ = [
     "FeatureEngineer",
@@ -221,6 +222,7 @@ class WandbLogger:
         if self.enabled:
             wandb.finish()
 
+
 def time_and_score(stage='train'):
     def decorator(func):
         @wraps(func)
@@ -397,7 +399,10 @@ def add_result(
 
     experiment_data = {
         "model": model_name,
-        "accuracy": float(output.get("mean_score")),
+        "accuracy": float(output.get("accuracy")),
+        "f1_score": float(output.get("f1_score")),
+        "precision": float(output.get("precision")),
+        "recall": float(output.get("recall")),
         "std": float(output.get("std_score")),
         "params": {str(k): str(v) for k, v in raw_params.items()},
         "tuning_time_sec": output.get("tuning_time_sec"),

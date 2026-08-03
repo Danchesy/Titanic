@@ -6,11 +6,11 @@ is_cat: ${preprocessing.encode_categorical}
 
 is_scale: ${preprocessing.scale_numeric}
 
-epochs: 10
+epochs: 20
 
-batch_size: 32
+batch_size: 64
 
-patience: 5
+patience: 10
 
 min_delta: 1e-4
 
@@ -35,3 +35,13 @@ scheduler:
   mode: 'min'
   patience: 5
   factor: 0.1
+
+metrics:
+  accuracy:
+    _target_: torchmetrics.classification.BinaryAccuracy
+  f1_score:
+    _target_: torchmetrics.classification.BinaryF1Score
+  precision:
+    _target_: torchmetrics.classification.BinaryPrecision
+  recall:
+    _target_: torchmetrics.classification.BinaryRecall
