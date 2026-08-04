@@ -2,6 +2,7 @@ import os
 import random
 import time
 from functools import wraps
+from pathlib import Path
 from typing import Any
 
 import joblib
@@ -21,7 +22,6 @@ __all__ = [
     "generate_submission",
     "holdout_score",
     "model_filename",
-    "pipeline_fit_params",
     "pipeline_return",
     "plot_feature_importance",
     "run_method",
@@ -30,26 +30,6 @@ __all__ = [
     "submission_output_path",
     "time_and_score",
 ]
-
-
-def time_and_score(stage='train'):
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-
-            final_stage = kwargs.pop('stage', stage)
-
-            start_train = time.time()
-            result = func(*args, **kwargs)
-            timer = time.time() - start_train
-
-            return {
-                "result": result,
-                f"{final_stage}_time_sec": timer
-            }
-        return wrapper
-    return decorator
-
 
 def set_seed(seed: int = 42) -> None:
     """Фиксирует seed для всех используемых библиотек (Python, NumPy, PyTorch)."""
@@ -202,14 +182,6 @@ def generate_submission(
     *_, test = data_loading(cfg)
     save_submission(pipeline, test, output_path)
 
-
-def pipeline_fit_params(cat_features: list[str] | None) -> dict[str, Any]:
-    """Параметры fit для CatBoost: cat_features нельзя задавать в __init__ (ломает CV clone)."""
-    if not cat_features:
-        return {}
-    return {"model__cat_features": list(cat_features)}
-
-
 def ensure_dirs(cfg: DictConfig) -> None:
     os.makedirs(cfg.data.models_dir, exist_ok=True)
     os.makedirs(cfg.data.results_dir, exist_ok=True)
@@ -223,11 +195,31 @@ def model_filename(
     score: float,
     extension: str = 'pkl',
 ) -> str:
+    models_dir = Path(cfg.data.models_dir)
+    
     prefix = f"{cfg.experiment_name}_" if cfg.get("experiment_name") else ""
-    return os.path.join(
-        cfg.data.models_dir,
-        f"{prefix}{model_name}_{method}_{score:.4f}.{extension}",
-    )
+    filename = f"{prefix}{model_name}_{method}_{score:.4f}.{extension}"
+    
+    return (models_dir / filename).as_posix()
+
+
+def time_and_score(stage='train'):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+
+            final_stage = kwargs.pop('stage', stage)
+
+            start_train = time.time()
+            result = func(*args, **kwargs)
+            timer = time.time() - start_train
+
+            return {
+                "result": result,
+                f"{final_stage}_time_sec": timer
+            }
+        return wrapper
+    return decorator
 
 
 @time_and_score(stage='predict')

@@ -21,7 +21,7 @@ def build_leaderboard_table(df: pd.DataFrame, metric: str = "accuracy") -> pd.Da
     best = (
         df.sort_values(metric, ascending=False)
         .groupby("model", as_index=False)
-        .first()[["model", metric, "tuning_time_sec", "predict_time_sec"]]
+        .first()[["model", metric, "f1_score", "tuning_time_sec", "latency_ms_per_sample"]]
         .sort_values(metric, ascending=False)
         .reset_index(drop=True)
     )
@@ -48,4 +48,3 @@ def update_readme_leaderboard(readme_path: str, leaderboard_md: str) -> None:
     with open(readme_path, "w", encoding="utf-8") as f:
         f.write(new_content)
     print("Таблица в README.md успешно обновлена!")
-

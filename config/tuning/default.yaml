@@ -1,12 +1,12 @@
 enabled: true
 
-n_trials: 2
+n_trials: 50
 
 timeout: null
 
 direction: maximize
 
-metric: f1
+metric: accuracy
 
 use_optuna: true
 

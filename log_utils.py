@@ -96,11 +96,12 @@ def add_result(
         "f1_score": float(output.get("f1_score")),
         "precision": float(output.get("precision")),
         "recall": float(output.get("recall")),
-        "std": float(output.get("std_score")),
+        "std": float(output.get("std_score", 0.0)),
         "params": {str(k): str(v) for k, v in raw_params.items()},
         "tuning_time_sec": output.get("tuning_time_sec"),
         "predict_time_sec": output.get("predict_time_sec"),
-        "latency_ms_per_sample": output.get("latency_ms_per_sample"),
+        "latency_ms_per_sample": output.get("latency_ms_per_sample", 0.0),
+        "path": output.get("path"),
     }
 
     if results is not None:

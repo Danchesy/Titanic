@@ -1,15 +1,15 @@
 import warnings
 from functools import partial
-from logging import WandbLogger
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from leaderboard import *
+from ensembles import make_ensembles
+from log_utils import WandbLogger
 from nn_model import nn_model
-from preprocessing import data_loading
+from readme_leaderboard import *
 from tuning_params import *
-from utils import set_seed
+from utils import data_loading, set_seed
 
 warnings.filterwarnings("ignore")
 
@@ -48,14 +48,23 @@ def main(cfg: DictConfig) -> None:
     X_train, X_val, y_train, y_val, X_submit = data_loading(cfg)
 
     if cfg.logging.console:
-        print(f"Train : {X_train.shape} | Val : {X_val.shape} | Test : {X_submit.shape}")
+        print(
+            f"Train : {X_train.shape} | Val : {X_val.shape} | Test : {X_submit.shape}"
+        )
 
     for model_name, model_cfg in cfg.model.items():
         if cfg.logging.console:
             print(f"\n{model_name.upper()}")
 
-        if model_name == 'nn_model':
+        if model_name == "nn_model":
             nn_model(X_train, y_train, X_val, y_val, X_submit, cfg, logger=logger)
+            continue
+
+        elif model_name == "ensemble":
+            make_ensembles(X_train, X_val, y_train, y_val, X_submit, methods=cfg.tuning.metrics,
+                    cfg=cfg,
+                    logger=logger,
+                )    
             continue
 
         clean_cfg = OmegaConf.create(
@@ -122,9 +131,6 @@ def main(cfg: DictConfig) -> None:
                 logger=logger,
             )
 
-    # ensemble
-    
-    
     table = (
         load_leaderboard("results/experiments.jsonl")
         .pipe(build_leaderboard_table)

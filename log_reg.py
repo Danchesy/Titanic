@@ -1,4 +1,4 @@
-from logging import add_result
+from log_utils import add_result
 from typing import Any
 
 import joblib

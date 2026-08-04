@@ -1,7 +1,7 @@
 import json
 import os
 import re
-from logging import _log
+from log_utils import _log
 
 import hydra
 import numpy as np
@@ -17,18 +17,18 @@ from utils import model_filename, run_method
 
 
 class Tokenizer(BaseEstimator, TransformerMixin):
-    def __init__(self, max_seq_len = 10):
+    def __init__(self, max_seq_len=10):
         self.max_seq_len = max_seq_len
         self.vocab = {}
 
     def _clean_and_tokenize(self, text):
         text = text.lower()
-        words = re.findall(r'\b\w+\b', text)
+        words = re.findall(r"\b\w+\b", text)
         return words
-    
+
     def fit(self, X):
         unique_words = set()
-        for name in X['Name']:
+        for name in X["Name"]:
             words = self._clean_and_tokenize(name)
             unique_words.update(words)
 
@@ -37,59 +37,58 @@ class Tokenizer(BaseEstimator, TransformerMixin):
         self.vocab["<UNK>"] = 1
 
         return self
-    
+
     def transform(self, X):
         X1 = X.copy()
 
         encoded_names = []
-        for name in X1['Name']:
+        for name in X1["Name"]:
             words = self._clean_and_tokenize(name)
             ids = [self.vocab.get(word, 1) for word in words]
 
             if len(ids) < self.max_seq_len:
                 ids = ids + [0] * (self.max_seq_len - len(ids))
             else:
-                ids = ids[:self.max_seq_len]
-                
+                ids = ids[: self.max_seq_len]
+
             encoded_names.append(ids)
 
         cols = [f"Name token {i}" for i in range(self.max_seq_len)]
         name_df = pd.DataFrame(data=encoded_names, columns=cols, index=X1.index)
 
-
         return name_df
 
 
 class TitanicNet(nn.Module):
-    def __init__(self, vocab_size, embedding_dim, max_seq_len, num_tabular_features, dropout_rate):
+    def __init__(
+        self, vocab_size, embedding_dim, max_seq_len, num_tabular_features, dropout_rate
+    ):
         super().__init__()
-        
+
         self.embedding = nn.Embedding(
-            num_embeddings=vocab_size, 
-            embedding_dim=embedding_dim, 
-            padding_idx=0
+            num_embeddings=vocab_size, embedding_dim=embedding_dim, padding_idx=0
         )
-        
+
         total_input_dim = num_tabular_features + (max_seq_len * embedding_dim)
-        
+
         self.mlp = nn.Sequential(
             nn.Linear(total_input_dim, 32),
             nn.ReLU(),
             nn.Dropout(dropout_rate),
             nn.BatchNorm1d(32),
             nn.Linear(32, 1),
-            nn.Sigmoid()
+            nn.Sigmoid(),
         )
-        
+
     def forward(self, x_tab, x_name):
         # [Batch, 10] -> [Batch, 10, 16]
         x_emb = self.embedding(x_name)
-        
+
         # [Batch, 10, 16] -> [Batch, 160]
         x_emb_flat = x_emb.view(x_emb.size(0), -1)
-        
+
         x_combined = torch.cat([x_tab, x_emb_flat], dim=1)
-        
+
         return self.mlp(x_combined)
 
 
@@ -98,12 +97,10 @@ def _nn_predict(model, X, X_name_tensor, batch_size=32):
     preds = []
 
     dataset = TensorDataset(X, X_name_tensor)
-    loader = DataLoader(
-                    dataset=dataset, 
-                    batch_size=batch_size)
+    loader = DataLoader(dataset=dataset, batch_size=batch_size)
 
     with torch.no_grad():
-        for batch_tab, batch_name in loader: 
+        for batch_tab, batch_name in loader:
             outputs = model(batch_tab, batch_name)
             preds.append(outputs.squeeze().numpy())
 
@@ -116,21 +113,20 @@ def save_nn_submission(
     cfg,
     tok,
     preproc,
-    submission_name: str = "NN_Model"):
+    submission_name: str = "NN_Model",
+):
 
     X_name_tensor = torch.tensor(tok.transform(X_submit).values, dtype=torch.long)
     X = torch.tensor(preproc.transform(X_submit), dtype=torch.float32)
 
     predictions = _nn_predict(model, X, X_name_tensor, batch_size=32)
 
-    submission = pd.DataFrame({
-        'PassengerId': X_submit.index, 
-        'Survived': (predictions > 0.5).astype(int)
-    })
+    submission = pd.DataFrame(
+        {"PassengerId": X_submit.index, "Survived": (predictions > 0.5).astype(int)}
+    )
 
     submission_path = os.path.join(
-        cfg.data.submission_path, 
-        f"{submission_name}_submission.csv"
+        cfg.data.submission_path, f"{submission_name}_submission.csv"
     )
     submission.to_csv(submission_path, index=False)
 
@@ -144,9 +140,9 @@ def nn_train_epoch(model, train_loader, loss_fn, optimizer, max_grad_norm=None):
 
     for batch_tab, batch_name, batch_y in train_loader:
         optimizer.zero_grad()
-        
+
         outputs = model(batch_tab, batch_name)
-                   
+
         loss = loss_fn(outputs.squeeze(), batch_y)
         loss.backward()
 
@@ -154,7 +150,7 @@ def nn_train_epoch(model, train_loader, loss_fn, optimizer, max_grad_norm=None):
             nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
 
         optimizer.step()
-        
+
         epoch_loss += loss.item()
 
     return epoch_loss / len(train_loader)
@@ -175,23 +171,24 @@ def nn_eval(model, loss_fn, X_val, X_val_name_tensor, y_val, methods):
 
             y_pred = (val_outputs.squeeze() > 0.5).float()
             metric_score = metric(y_pred, y_val)
-            
+
             if torch.is_tensor(metric_score):
                 metric_score = metric_score.item()
-                
+
             metric_to_score[name] = metric_score
 
     return val_loss, metric_to_score
 
 
-def nn_train_pipeline(X_train, y_train, X_val, y_val, cfg, logger=None): 
+def nn_train_pipeline(X_train, y_train, X_val, y_val, cfg, logger=None):
     console = cfg.logging.console
 
-    preproc = build_preprocessor(cfg=cfg,
-                        model_cfg=cfg.model.nn_model,
-                        is_scale=cfg.model.nn_model.is_scale, 
-                        is_cat=cfg.model.nn_model.is_cat)
-
+    preproc = build_preprocessor(
+        cfg=cfg,
+        model_cfg=cfg.model.nn_model,
+        is_scale=cfg.model.nn_model.is_scale,
+        is_cat=cfg.model.nn_model.is_cat,
+    )
 
     tok = Tokenizer(max_seq_len=cfg.model.nn_model.max_seq_len)
     tok.fit(X_train)
@@ -200,7 +197,6 @@ def nn_train_pipeline(X_train, y_train, X_val, y_val, cfg, logger=None):
 
     vocab_size = len(tok.vocab)
     embedding_dim = cfg.model.nn_model.embedding_dim
-
 
     X_train_name_tensor = torch.tensor(X_train_name.values, dtype=torch.long)
     X_val_name_tensor = torch.tensor(X_val_name.values, dtype=torch.long)
@@ -216,98 +212,117 @@ def nn_train_pipeline(X_train, y_train, X_val, y_val, cfg, logger=None):
         embedding_dim=embedding_dim,
         max_seq_len=cfg.model.nn_model.max_seq_len,
         num_tabular_features=X_train_tab.shape[1],
-        dropout_rate=cfg.model.nn_model.dropout_rate
+        dropout_rate=cfg.model.nn_model.dropout_rate,
     )
 
     train_dataset = TensorDataset(X_train_tab, X_train_name_tensor, y_train_tensor)
     train_loader = DataLoader(
-                    dataset=train_dataset, 
-                    batch_size=cfg.model.nn_model.batch_size,
-                    shuffle = cfg.model.nn_model.shuffle)
+        dataset=train_dataset,
+        batch_size=cfg.model.nn_model.batch_size,
+        shuffle=cfg.model.nn_model.shuffle,
+    )
 
-    optimizer = hydra.utils.instantiate(cfg.model.nn_model.optimizer, params=model.parameters())
+    optimizer = hydra.utils.instantiate(
+        cfg.model.nn_model.optimizer, params=model.parameters()
+    )
     loss_fn = nn.BCELoss()
-    scheduler = hydra.utils.instantiate(cfg.model.nn_model.scheduler, optimizer=optimizer)
+    scheduler = hydra.utils.instantiate(
+        cfg.model.nn_model.scheduler, optimizer=optimizer
+    )
     epochs = cfg.model.nn_model.epochs
 
-    best_loss = float('inf')
+    best_loss = float("inf")
     patience = cfg.model.nn_model.patience
     patience_counter = 0
 
     for epoch in range(epochs):
-        avg_train_loss = nn_train_epoch(model=model, train_loader=train_loader, loss_fn=loss_fn, optimizer=optimizer)
+        avg_train_loss = nn_train_epoch(
+            model=model, train_loader=train_loader, loss_fn=loss_fn, optimizer=optimizer
+        )
         val_loss, metrics = nn_eval(
-                                model, 
-                                loss_fn=loss_fn, 
-                                X_val=X_val_tab, 
-                                X_val_name_tensor=X_val_name_tensor, 
-                                y_val=y_val_tensor, 
-                                methods=OmegaConf.to_container(cfg.model.nn_model.metrics, resolve=True))
+            model,
+            loss_fn=loss_fn,
+            X_val=X_val_tab,
+            X_val_name_tensor=X_val_name_tensor,
+            y_val=y_val_tensor,
+            methods=OmegaConf.to_container(cfg.model.nn_model.metrics, resolve=True),
+        )
 
         if val_loss.item() < best_loss - cfg.model.nn_model.min_delta:
             best_loss = val_loss.item()
             patience_counter = 0
 
             model_name = model.__class__.__name__
-            filename = model_filename(cfg, model_name, "states", metrics['accuracy'], extension='pt')
+            filename = model_filename(
+                cfg, model_name, "states", metrics["accuracy"], extension="pt"
+            )
             checkpoint = {
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'epoch': epoch,
-                'val_accuracy': metrics['accuracy'], 
-                'tokenizer_vocab': tok.vocab,
-                'tokenizer_max_seq_len': tok.max_seq_len,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict(),
+                "epoch": epoch,
+                "val_accuracy": metrics["accuracy"],
+                "tokenizer_vocab": tok.vocab,
+                "tokenizer_max_seq_len": tok.max_seq_len,
             }
-            
+
             torch.save(checkpoint, filename)
 
             if logger is not None:
                 logger.log_pipeline(filename)
             _log(f"Model states saved as: {filename}", console)
-        else: 
+        else:
             patience_counter += 1
 
         scheduler.step(val_loss)
 
         if patience_counter >= patience:
-            _log(f"Early stopping triggered at epoch {epoch+1}", console)
+            _log(f"Early stopping triggered at epoch {epoch + 1}", console)
             break
 
-        _log(f'Epoch {epoch+1}/{epochs}, '
-        f"Loss: {avg_train_loss:.4f}, "
-        f"Val Loss: {val_loss.item():.4f}, "
-        f"Val Accuracy: {metrics['accuracy']:.4f}", console)
+        _log(
+            f"Epoch {epoch + 1}/{epochs}, "
+            f"Loss: {avg_train_loss:.4f}, "
+            f"Val Loss: {val_loss.item():.4f}, "
+            f"Val Accuracy: {metrics['accuracy']:.4f}",
+            console,
+        )
 
     return {
-        "model": model, 
-        "X_val_tab": X_val_tab, 
-        "X_val_name_tensor": X_val_name_tensor, 
+        "model": model,
+        "X_val_tab": X_val_tab,
+        "X_val_name_tensor": X_val_name_tensor,
         "y_val_tensor": y_val_tensor,
         "preproc": preproc,
         "tok": tok,
+        "path": filename,
     }
 
 
 def add_nn_res(
     metric_to_score,
     loss,
+    tuning_time_sec,
     predict_time,
     latency_ms,
     model_cfg,
-    results = None,
-    log_file_path = None):
+    path,
+    results=None,
+    log_file_path=None,
+):
 
     experiment_data = {
-        "model": 'NN_Model',
-        "accuracy": metric_to_score.get('accuracy', None),
-        "f1_score": metric_to_score.get('f1_score', None),
-        "precision": metric_to_score.get('precision', None),
-        "recall": metric_to_score.get('recall', None),
+        "model": "NN_Model",
+        "accuracy": metric_to_score.get("accuracy", None),
+        "f1_score": metric_to_score.get("f1_score", None),
+        "precision": metric_to_score.get("precision", None),
+        "recall": metric_to_score.get("recall", None),
         "loss": loss,
-        "hyperparams": OmegaConf.to_container(model_cfg, resolve=True),
+        "params": OmegaConf.to_container(model_cfg, resolve=True),
+        "tuning_time_sec": tuning_time_sec,
         "predict_time_sec": predict_time,
         "latency_ms_per_sample": latency_ms,
+        "path": path,
     }
 
     if results is not None:
@@ -335,12 +350,14 @@ def nn_model(X_train, y_train, X_val, y_val, X_submit, cfg, logger=None):
     )
 
     pipeline_res = pipeline_output["result"]
+    cycle_time = pipeline_output["nn_pipeline_time_sec"]
     model = pipeline_res["model"]
     X_val_tab = pipeline_res["X_val_tab"]
     X_val_name_tensor = pipeline_res["X_val_name_tensor"]
     y_val_tensor = pipeline_res["y_val_tensor"]
-    tok = pipeline_res["tok"] 
-    preproc = pipeline_res["preproc"] 
+    tok = pipeline_res["tok"]
+    preproc = pipeline_res["preproc"]
+    path = pipeline_res["path"]
 
     loss_fn = torch.nn.BCELoss()
 
@@ -358,16 +375,19 @@ def nn_model(X_train, y_train, X_val, y_val, X_submit, cfg, logger=None):
 
     val_loss, metrics = eval_output["result"]
     predict_time = eval_output["nn_predict_time_sec"]
+    tuning_time_sec = cycle_time - predict_time
     num_samples = X_val_tab.shape[0]
     latency_ms_per_sample = (predict_time * 1000) / num_samples
 
     add_nn_res(
         metric_to_score=metrics,
         loss=val_loss.item(),
+        tuning_time_sec=tuning_time_sec,
         predict_time=predict_time,
         latency_ms=latency_ms_per_sample,
         model_cfg=cfg.model.nn_model,
-        log_file_path=os.path.join(cfg.data.results_dir, "experiments.jsonl")
+        path=path,
+        log_file_path=os.path.join(cfg.data.results_dir, "experiments.jsonl"),
     )
 
     if X_submit is not None and tok is not None and preproc is not None:
@@ -377,6 +397,6 @@ def nn_model(X_train, y_train, X_val, y_val, X_submit, cfg, logger=None):
             cfg=cfg,
             tok=tok,
             preproc=preproc,
-            submission_name="Titanic_NN_Model"
+            submission_name="Titanic_NN_Model",
         )
         _log(f"Submission saved: {submission_path}", cfg.logging.console)

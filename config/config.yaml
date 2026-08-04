@@ -13,6 +13,7 @@ defaults:
   - model@model.lightgbm: lightgbm
   - model@model.catboost: catboost
   - model@model.nn_model: nn_model
+  - model@model.ensemble: ensemble
   - _self_
 
 experiment_name: Titanic

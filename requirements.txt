@@ -15,3 +15,5 @@ torch>=2.0
 shap
 tabulate
 torchmetrics
+ipykernel
+jupyter

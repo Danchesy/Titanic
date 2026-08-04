@@ -1,6 +1,5 @@
 import os
 from collections.abc import Callable
-from logging import _log, add_result
 from typing import Any
 
 import hydra
@@ -12,6 +11,7 @@ from sklearn.base import clone
 from sklearn.model_selection import GridSearchCV, cross_val_score
 from sklearn.pipeline import Pipeline
 
+from log_utils import _log, add_result
 from preprocessing import build_preprocessor, pipeline_fit_params
 from utils import (
     ensure_dirs,
@@ -74,7 +74,10 @@ def grid_tuning(
 
     pipeline = Pipeline(
         [
-            ("preprocessor", build_preprocessor(cfg, model_cfg, is_scale=is_scale, is_cat=is_cat)),
+            (
+                "preprocessor",
+                build_preprocessor(cfg, model_cfg, is_scale=is_scale, is_cat=is_cat),
+            ),
             ("model", model),
         ]
     )
@@ -91,7 +94,14 @@ def grid_tuning(
         return_train_score=False,
     )
 
-    train_output = run_method(obj=grid_search, method_name='fit', stage='train', X=X_train, y=y_train, **pipeline_fit_params(cat_features))
+    train_output = run_method(
+        obj=grid_search,
+        method_name="fit",
+        stage="train",
+        X=X_train,
+        y=y_train,
+        **pipeline_fit_params(cat_features),
+    )
 
     _log(f"Best parameters: {grid_search.best_params_}", console)
     _log(f"Best CV {metric}: {grid_search.best_score_:.4f}", console)
@@ -99,21 +109,29 @@ def grid_tuning(
 
     best_pipeline = grid_search.best_estimator_
 
-    pred_output = holdout_score(pipeline=best_pipeline, X=X_test, y=y_test, metric=metric)
+    pred_output = holdout_score(
+        pipeline=best_pipeline, X=X_test, y=y_test, metric=metric
+    )
 
     _log(f"Holdout {metric}: {pred_output['result']:.4f}", console)
-    _log(f"Holdout predict ({len(X_test)} lines): {pred_output['result']:.4f} s.", console)
-    _log(f"Latency: {(pred_output['predict_time_sec'] / len(X_test)) * 1000:.4f} ms", console)
+    _log(
+        f"Holdout predict ({len(X_test)} lines): {pred_output['result']:.4f} s.",
+        console,
+    )
+    _log(
+        f"Latency: {(pred_output['predict_time_sec'] / len(X_test)) * 1000:.4f} ms",
+        console,
+    )
 
     y_pred_holdout = best_pipeline.predict(X_test)
-    
+
     metric_to_score = {}
     for name, metric_cfg in methods.items():
         metric_fn = hydra.utils.instantiate(metric_cfg)
-        
+
         score = metric_fn(y_test, y_pred_holdout)
         metric_to_score[name] = float(score)
-        
+
         _log(f"Holdout {name}: {score:.4f}", console)
 
     res = pipeline_return(
@@ -124,15 +142,18 @@ def grid_tuning(
         n_samples=len(X_test),
     )
 
-    res.update(metric_to_score)
+    model_name = model.__class__.__name__
+    filename = model_filename(cfg, model_name, "grid", grid_search.best_score_)
 
-    experiment = add_result(res, log_file_path=os.path.join(cfg.data.results_dir, "experiments.jsonl"))
+    res.update(metric_to_score)
+    res.update({"path": filename})
+
+    experiment = add_result(
+        res, log_file_path=os.path.join(cfg.data.results_dir, "experiments.jsonl")
+    )
 
     if logger is not None:
         logger.log_experiment(experiment)
-
-    model_name = model.__class__.__name__
-    filename = model_filename(cfg, model_name, "grid", grid_search.best_score_)
 
     if cfg.logging.save_model:
         joblib.dump(best_pipeline, filename)
@@ -197,7 +218,12 @@ def optuna_tuning(
 
         pipeline = Pipeline(
             [
-                ("preprocessor", build_preprocessor(cfg, model_cfg, is_scale=is_scale, is_cat=is_cat)),
+                (
+                    "preprocessor",
+                    build_preprocessor(
+                        cfg, model_cfg, is_scale=is_scale, is_cat=is_cat
+                    ),
+                ),
                 ("model", current_model),
             ]
         )
@@ -213,14 +239,27 @@ def optuna_tuning(
         return score
 
     study = optuna.create_study(direction=direction)
-    optimizer_output = run_method(obj=study, method_name='optimize', stage='optuna', func=objective, n_trials=n_trials, timeout=timeout)
+    optimizer_output = run_method(
+        obj=study,
+        method_name="optimize",
+        stage="optuna",
+        func=objective,
+        n_trials=n_trials,
+        timeout=timeout,
+    )
 
     best_params = study.best_trial.user_attrs.get("sklearn_params", study.best_params)
 
     _log(f"Best CV {metric}: {study.best_value:.4f}", console)
     _log(f"Best parameters: {best_params}", console)
-    _log(f"Optuna optimization time ({n_trials} trials): {optimizer_output['optuna_time_sec']:.2f} s.", console)
-    _log(f"Mean time per trial: {optimizer_output['optuna_time_sec'] / max(n_trials, 1):.2f} s.", console)
+    _log(
+        f"Optuna optimization time ({n_trials} trials): {optimizer_output['optuna_time_sec']:.2f} s.",
+        console,
+    )
+    _log(
+        f"Mean time per trial: {optimizer_output['optuna_time_sec'] / max(n_trials, 1):.2f} s.",
+        console,
+    )
 
     best_model = clone(model)
     best_model.set_params(**best_params)
@@ -232,44 +271,55 @@ def optuna_tuning(
         ]
     )
 
-    train_output = run_method(obj=final_pipeline, method_name='fit', stage='train', X=X_train, y=y_train, **pipeline_fit_params(cat_features))
+    train_output = run_method(
+        obj=final_pipeline,
+        method_name="fit",
+        stage="train",
+        X=X_train,
+        y=y_train,
+        **pipeline_fit_params(cat_features),
+    )
 
-    
     pred_output = holdout_score(final_pipeline, X_test, y_test, metric)
-    
 
     _log(f"Holdout {metric}: {pred_output['result']:.4f}", console)
     _log(f"Final pipeline's training: {train_output['train_time_sec']:.4f} s.", console)
-    _log(f"Holdout predictions ({len(X_test)} lines): {pred_output['predict_time_sec']:.4f} s.", console)
+    _log(
+        f"Holdout predictions ({len(X_test)} lines): {pred_output['predict_time_sec']:.4f} s.",
+        console,
+    )
 
     y_pred_holdout = final_pipeline.predict(X_test)
-    
+
     metric_to_score = {}
     for name, metric_cfg in methods.items():
         metric_fn = hydra.utils.instantiate(metric_cfg)
-        
+
         score = metric_fn(y_test, y_pred_holdout)
         metric_to_score[name] = float(score)
-        
+
         _log(f"Holdout {name}: {score:.4f}", console)
 
     res = pipeline_return(
         final_pipeline,
         study.best_value,
-        tuning_time=optimizer_output['optuna_time_sec'],
+        tuning_time=optimizer_output["optuna_time_sec"],
         predict_time=pred_output["predict_time_sec"],
         n_samples=len(X_test),
     )
 
-    res.update(metric_to_score)
+    model_name = model.__class__.__name__
+    filename = model_filename(cfg, model_name, "optuna", study.best_value)
 
-    experiment = add_result(res, log_file_path=os.path.join(cfg.data.results_dir, "experiments.jsonl"))
+    res.update(metric_to_score)
+    res.update({"path": filename})
+
+    experiment = add_result(
+        res, log_file_path=os.path.join(cfg.data.results_dir, "experiments.jsonl")
+    )
 
     if logger is not None:
         logger.log_experiment(experiment)
-
-    model_name = model.__class__.__name__
-    filename = model_filename(cfg, model_name, "optuna", study.best_value)
 
     if cfg.logging.save_model:
         joblib.dump(final_pipeline, filename)
@@ -299,7 +349,7 @@ def logreg_optuna_params(
         allowed_penalties = val
 
     allowed_penalties = [None if p == "none" else p for p in allowed_penalties]
-    
+
     # Разные пространства выбора для разных solver называем penalty_<solver>
     penalty = trial.suggest_categorical(f"penalty_{solver}", allowed_penalties)
 
@@ -390,7 +440,9 @@ def xgb_optuna_params(trial: optuna.Trial) -> dict[str, Any]:
         "reg_alpha": trial.suggest_float("reg_alpha", 0.01, 2.0, log=True),
         "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
         "subsample": trial.suggest_float("subsample", 0.6, 0.8, step=0.05),
-        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 0.8, step=0.05),
+        "colsample_bytree": trial.suggest_float(
+            "colsample_bytree", 0.6, 0.8, step=0.05
+        ),
         "gamma": trial.suggest_float("gamma", 0.0, 0.3, step=0.05),
     }
 
@@ -405,7 +457,9 @@ def lgbm_optuna_params(trial: optuna.Trial) -> dict[str, Any]:
         "reg_alpha": trial.suggest_float("reg_alpha", 0.01, 2.0, log=True),
         "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
         "subsample": trial.suggest_float("subsample", 0.6, 0.8, step=0.05),
-        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 0.8, step=0.05),
+        "colsample_bytree": trial.suggest_float(
+            "colsample_bytree", 0.6, 0.8, step=0.05
+        ),
         "min_split_gain": trial.suggest_float("min_split_gain", 0.0, 0.3, step=0.05),
     }
 
