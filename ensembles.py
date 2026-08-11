@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Any
 
 import hydra
 import joblib
@@ -20,67 +21,82 @@ from utils import (
 
 
 class PreTrainedStackingClassifier:
-    def __init__(self, estimators, final_estimator):
-        self.estimators = estimators
-        self.final_estimator = final_estimator
-        
-    def _get_meta_features(self, X):
-        meta_features = []
+    """Мета-модель стекинга, которая объединяет предсказания от заранее обученных пайплайнов.
+    
+    Args:
+        estimators: List of tuples `(name, pipeline)` where each pipeline implements `predict_proba`.
+        final_estimator: Estimator to train on meta-features produced by base estimators.
+    """
+
+    def __init__(self, estimators: list[tuple[str, Any]], final_estimator: Any) -> None:
+        self.estimators: list[tuple[str, Any]] = estimators
+        self.final_estimator: Any = final_estimator
+
+    def _get_meta_features(self, X: pd.DataFrame) -> np.ndarray:
+        """Create meta-features by collecting positive-class probabilities from each estimator."""
+        meta_features: list[np.ndarray] = []
         for name, pipe in self.estimators:
             preds = pipe.predict_proba(X)[:, 1]
             meta_features.append(preds)
         return np.column_stack(meta_features)
 
-    def fit(self, X, y):
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> "PreTrainedStackingClassifier":
+        """Fit the final estimator on meta features extracted from X."""
         X_meta = self._get_meta_features(X)
         self.final_estimator.fit(X_meta, y)
         return self
 
-    def predict(self, X):
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        """Predict labels using the trained final estimator on meta features."""
         X_meta = self._get_meta_features(X)
         return self.final_estimator.predict(X_meta)
 
-    def score(self, X, y):
+    def score(self, X: pd.DataFrame, y: pd.Series) -> float:
+        """Compute accuracy of the stacked model on (X, y)."""
         from sklearn.metrics import accuracy_score
-        return accuracy_score(y, self.predict(X))
 
-    def get_params(self, deep=True):
-        """Возвращает параметры для совместимости с логированием."""
+        return float(accuracy_score(y, self.predict(X)))
+
+    def get_params(self, deep: bool = True) -> dict[str, Any]:
+        """Return simple params for logging compatibility."""
         return {
             "estimators_count": len(self.estimators),
-            "estimators_names": [name for name, _ in self.estimators]
+            "estimators_names": [name for name, _ in self.estimators],
         }
 
 
 class PreTrainedVotingClassifier:
-    def __init__(self, estimators):
-        self.estimators = estimators  # Список кортежей [(name, pipe), ...]
+    """Простой усредняющий классификатор для предобученных моделей, который усредняет предсказанные вероятности."""
 
-    def fit(self, X=None, y=None):
-        # Заглушка для совместимости с API sklearn.
-        # Берутся предобученные модели.
+    def __init__(self, estimators: list[tuple[str, Any]]) -> None:
+        self.estimators: list[tuple[str, Any]] = estimators  # list of (name, pipeline)
+
+    def fit(self, X: pd.DataFrame | None = None, y: pd.Series | None = None) -> "PreTrainedVotingClassifier":
+        """No-op fit for API compatibility (models are pre-trained)."""
         return self
 
-    def predict_proba(self, X):
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        """Average predicted probabilities from all estimators."""
         all_probas = [pipe.predict_proba(X) for _, pipe in self.estimators]
         return np.mean(all_probas, axis=0)
 
-    def predict(self, X):
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        """Return class indices with highest averaged probability."""
         probas = self.predict_proba(X)
         return np.argmax(probas, axis=1)
 
-    def score(self, X, y):
-        return accuracy_score(y, self.predict(X))
+    def score(self, X: pd.DataFrame, y: pd.Series) -> float:
+        return float(accuracy_score(y, self.predict(X)))
 
-    def get_params(self, deep=True):
-        """Возвращает параметры для совместимости с логированием."""
+    def get_params(self, deep: bool = True) -> dict[str, Any]:
+        """Return simple params for logging compatibility."""
         return {
             "estimators_count": len(self.estimators),
-            "estimators_names": [name for name, _ in self.estimators]
+            "estimators_names": [name for name, _ in self.estimators],
         }
 
 
-def load_stacking_pipeline(leaderboard: pd.DataFrame, top_k: int | None = None):
+def load_stacking_pipeline(leaderboard: pd.DataFrame, top_k: int | None = None) -> PreTrainedStackingClassifier:
     pipelines = load_pipelines(leaderboard, top_k)
     estimators = list(pipelines.items())
     
@@ -90,14 +106,14 @@ def load_stacking_pipeline(leaderboard: pd.DataFrame, top_k: int | None = None):
     )
 
 
-def load_voting_pipeline(leaderboard: pd.DataFrame, top_k: int | None = None):
+def load_voting_pipeline(leaderboard: pd.DataFrame, top_k: int | None = None) -> PreTrainedVotingClassifier:
     pipelines = load_pipelines(leaderboard, top_k)
     estimators = list(pipelines.items())
-    
+
     return PreTrainedVotingClassifier(estimators=estimators)
 
 
-def load_pipelines(leaderboard: pd.DataFrame, top_k: int | None = None):
+def load_pipelines(leaderboard: pd.DataFrame, top_k: int | None = None) -> dict[str, Any]:
     best_models = (
         leaderboard.sort_values(by="accuracy", ascending=False)
             .groupby("model", as_index=False)
@@ -114,13 +130,26 @@ def load_pipelines(leaderboard: pd.DataFrame, top_k: int | None = None):
 
 
 def ensemble_return(
-    model,
-    metric_to_score,
-    path,
+    model: Any,
+    metric_to_score: dict[str, float],
+    path: str,
     tuning_time: float | None = None,
     predict_time: float | None = None,
     n_samples: int | None = None,
-) -> dict:
+) -> dict[str, Any]:
+    """Строит словарь с результатами эксперимента для ансамблей моделей, включая метрики и время выполнения.
+
+    Args:
+        model: The model object or pipeline used for the ensemble.
+        metric_to_score: Dict mapping metric names to their computed floats.
+        path: Path where the model will be saved.
+        tuning_time: Optional tuning time in seconds.
+        predict_time: Optional prediction time in seconds.
+        n_samples: Optional number of samples for latency computation.
+
+    Returns:
+        Dict[str, Any]: Experiment result record.
+    """
     result = {
         "model": model,
         "accuracy": metric_to_score.get("accuracy", None),
@@ -144,7 +173,20 @@ def ensemble_return(
     return result
 
 
-def make_ensembles(X_train, X_val, y_train, y_val, X_submit, methods, cfg, logger=None):    
+def make_ensembles(
+    X_train: pd.DataFrame,
+    X_val: pd.DataFrame,
+    y_train: pd.Series,
+    y_val: pd.Series,
+    X_submit: pd.DataFrame,
+    methods: dict[str, Any],
+    cfg: Any,
+    logger: Any | None = None,
+) -> None:
+    """Создает и оценивает ансамбли моделей, определенные в конфигурации.
+
+    Функция читает пайплайны из лидерборда, создает ансамбли, оценивает их на отложенной выборке и при необходимости сохраняет модели/предсказания.
+    """
     console = cfg.logging.console
     log_file_path = os.path.join(cfg.data.results_dir, "experiments.jsonl")
 

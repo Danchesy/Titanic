@@ -1,7 +1,7 @@
 import json
 import os
 import re
-from log_utils import _log
+from typing import Any
 
 import hydra
 import numpy as np
@@ -12,21 +12,25 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
+from log_utils import _log
 from preprocessing import build_preprocessor
 from utils import model_filename, run_method
 
 
 class Tokenizer(BaseEstimator, TransformerMixin):
-    def __init__(self, max_seq_len=10):
-        self.max_seq_len = max_seq_len
-        self.vocab = {}
+    """Простой токенизатор, который преобразует строки с именами в последовательности целых чисел фиксированной длины."""
 
-    def _clean_and_tokenize(self, text):
+    def __init__(self, max_seq_len: int = 10) -> None:
+        self.max_seq_len: int = max_seq_len
+        self.vocab: dict[str, int] = {}
+
+    def _clean_and_tokenize(self, text: str) -> list[str]:
         text = text.lower()
         words = re.findall(r"\b\w+\b", text)
         return words
 
-    def fit(self, X):
+    def fit(self, X: pd.DataFrame) -> "Tokenizer":
+        """Создает словарь из столбца Name матрицы X"""
         unique_words = set()
         for name in X["Name"]:
             words = self._clean_and_tokenize(name)
@@ -38,7 +42,8 @@ class Tokenizer(BaseEstimator, TransformerMixin):
 
         return self
 
-    def transform(self, X):
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Кодирует столбец `Name` в DataFrame фиксированной длины с идентификаторами токенов."""
         X1 = X.copy()
 
         encoded_names = []
@@ -61,8 +66,13 @@ class Tokenizer(BaseEstimator, TransformerMixin):
 
 class TitanicNet(nn.Module):
     def __init__(
-        self, vocab_size, embedding_dim, max_seq_len, num_tabular_features, dropout_rate
-    ):
+        self,
+        vocab_size: int,
+        embedding_dim: int,
+        max_seq_len: int,
+        num_tabular_features: int,
+        dropout_rate: float,
+    ) -> None:
         super().__init__()
 
         self.embedding = nn.Embedding(
@@ -80,7 +90,7 @@ class TitanicNet(nn.Module):
             nn.Sigmoid(),
         )
 
-    def forward(self, x_tab, x_name):
+    def forward(self, x_tab: torch.Tensor, x_name: torch.Tensor) -> torch.Tensor:
         # [Batch, 10] -> [Batch, 10, 16]
         x_emb = self.embedding(x_name)
 
@@ -93,6 +103,17 @@ class TitanicNet(nn.Module):
 
 
 def _nn_predict(model, X, X_name_tensor, batch_size=32):
+    """Запускает forward pass модели на батчах данных и возвращает объединенные предсказания.
+
+    Args:
+        model: PyTorch `nn.Module` to use for prediction.
+        X: Tabular features tensor of shape [N, num_tabular_features].
+        X_name_tensor: Name token tensor of shape [N, max_seq_len].
+        batch_size: Batch size for DataLoader.
+
+    Returns:
+        np.ndarray: 1D array of model outputs (probabilities).
+    """
     model.eval()
     preds = []
 
@@ -102,7 +123,7 @@ def _nn_predict(model, X, X_name_tensor, batch_size=32):
     with torch.no_grad():
         for batch_tab, batch_name in loader:
             outputs = model(batch_tab, batch_name)
-            preds.append(outputs.squeeze().numpy())
+            preds.append(outputs.squeeze().cpu().numpy())
 
     return np.concatenate(preds)
 
@@ -110,11 +131,11 @@ def _nn_predict(model, X, X_name_tensor, batch_size=32):
 def save_nn_submission(
     model: nn.Module,
     X_submit: pd.DataFrame,
-    cfg,
-    tok,
-    preproc,
+    cfg: Any,
+    tok: Tokenizer,
+    preproc: Any,
     submission_name: str = "NN_Model",
-):
+) -> str:
 
     X_name_tensor = torch.tensor(tok.transform(X_submit).values, dtype=torch.long)
     X = torch.tensor(preproc.transform(X_submit), dtype=torch.float32)
@@ -134,7 +155,13 @@ def save_nn_submission(
     return submission_path
 
 
-def nn_train_epoch(model, train_loader, loss_fn, optimizer, max_grad_norm=None):
+def nn_train_epoch(
+    model: nn.Module,
+    train_loader: DataLoader,
+    loss_fn: Any,
+    optimizer: Any,
+    max_grad_norm: float | None = None,
+) -> float:
     model.train()
     epoch_loss = 0.0
 
@@ -156,7 +183,19 @@ def nn_train_epoch(model, train_loader, loss_fn, optimizer, max_grad_norm=None):
     return epoch_loss / len(train_loader)
 
 
-def nn_eval(model, loss_fn, X_val, X_val_name_tensor, y_val, methods):
+def nn_eval(
+    model: nn.Module,
+    loss_fn: Any,
+    X_val: torch.Tensor,
+    X_val_name_tensor: torch.Tensor,
+    y_val: torch.Tensor,
+    methods: dict[str, Any],
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Валидирует модель на отложенной выборке и вычисляет метрики.
+
+    Returns кортеж `(loss, metric_to_score)`, где `loss` — тензор потерь,
+    а `metric_to_score` — словарь с метриками.
+    """
     model.eval()
 
     metric_to_score = {}
@@ -165,7 +204,6 @@ def nn_eval(model, loss_fn, X_val, X_val_name_tensor, y_val, methods):
         val_outputs = model(X_val, X_val_name_tensor)
         val_loss = loss_fn(val_outputs.squeeze(), y_val)
 
-        metric_to_score = {}
         for name, metric_cfg in methods.items():
             metric = hydra.utils.instantiate(metric_cfg)
 
@@ -175,12 +213,19 @@ def nn_eval(model, loss_fn, X_val, X_val_name_tensor, y_val, methods):
             if torch.is_tensor(metric_score):
                 metric_score = metric_score.item()
 
-            metric_to_score[name] = metric_score
+            metric_to_score[name] = float(metric_score)
 
     return val_loss, metric_to_score
 
 
-def nn_train_pipeline(X_train, y_train, X_val, y_val, cfg, logger=None):
+def nn_train_pipeline(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    X_val: pd.DataFrame,
+    y_val: pd.Series,
+    cfg: Any,
+    logger: Any | None = None,
+) -> dict[str, Any]:
     console = cfg.logging.console
 
     preproc = build_preprocessor(
@@ -300,16 +345,32 @@ def nn_train_pipeline(X_train, y_train, X_val, y_val, cfg, logger=None):
 
 
 def add_nn_res(
-    metric_to_score,
-    loss,
-    tuning_time_sec,
-    predict_time,
-    latency_ms,
-    model_cfg,
-    path,
-    results=None,
-    log_file_path=None,
-):
+    metric_to_score: dict[str, float],
+    loss: float,
+    tuning_time_sec: float | None,
+    predict_time: float | None,
+    latency_ms: float | None,
+    model_cfg: Any,
+    path: str,
+    results: list | None = None,
+    log_file_path: str | None = None,
+) -> dict[str, Any]:
+    """Создает и опционально сохраняет запись в формате JSONL, описывающую эксперимент с нейронной сетью.
+    
+    Args:
+        metric_to_score: Dict with metric names and float values.
+        loss: Validation loss value.
+        tuning_time_sec: Tuning/training time in seconds.
+        predict_time: Prediction time in seconds.
+        latency_ms: Latency per sample in milliseconds.
+        model_cfg: Model configuration (OmegaConf node).
+        path: Path to saved model or checkpoint.
+        results: Optional list to append the experiment record to.
+        log_file_path: Optional path to append the JSONL record on disk.
+
+    Returns:
+        Словарь с данными эксперимента, включая метрики, время выполнения и путь к модели.
+   """
 
     experiment_data = {
         "model": "NN_Model",
@@ -336,7 +397,15 @@ def add_nn_res(
     return experiment_data
 
 
-def nn_model(X_train, y_train, X_val, y_val, X_submit, cfg, logger=None):
+def nn_model(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    X_val: pd.DataFrame,
+    y_val: pd.Series,
+    X_submit: pd.DataFrame | None,
+    cfg: Any,
+    logger: Any | None = None,
+) -> None:
     pipeline_output = run_method(
         obj=nn_train_pipeline,
         method_name="__call__",

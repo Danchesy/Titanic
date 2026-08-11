@@ -147,7 +147,7 @@ def preprocessor(
     encoder: BaseEstimator | None = None,
     drop_columns: list[str] | None = None,
     q_num: int = 4,
-) -> Pipeline:
+) -> Pipeline | FeatureEngineer:
     """
     Создает пайплайн предобработки данных с возможностью масштабирования и кодирования.
 
@@ -228,7 +228,13 @@ def build_preprocessor(
 
 
 def pipeline_fit_params(cat_features: list[str] | None) -> dict[str, Any]:
-    """Параметры fit для CatBoost: cat_features нельзя задавать в __init__ (ломает CV clone)."""
+    """Параметры fit для CatBoost
+    Args:
+        cat_features: List of categorical feature names or indices, or None.
+
+    Returns:
+        Dict[str, Any]: kwargs to pass into `fit(...)``.
+    """
     if not cat_features:
         return {}
     return {"model__cat_features": list(cat_features)}

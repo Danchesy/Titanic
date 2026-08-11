@@ -1,6 +1,6 @@
 import os
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Callable, Dict, Optional, List
 
 import hydra
 import joblib
@@ -52,19 +52,24 @@ def grid_tuning(
     X_submit: pd.DataFrame | None = None,
     logger: Any = None,
 ) -> GridSearchCV:
-    """Обёртка GridSearchCV: строит пайплайн с предобработкой, обучает, логирует и сохраняет лучший estimator.
+    """Обёртка для `GridSearchCV` — строит пайплайн с предобработкой,
+    запускает поиск, логирует результаты и сохраняет лучший пайплайн.
 
-    Args:
+    Аргументы:
         model: sklearn-совместимый классификатор.
-        params: сетка гиперпараметров с префиксом ``model__``.
+        params: сетка гиперпараметров (ключи должны иметь префикс ``model__``).
         X_train, y_train: обучающая выборка.
         X_test, y_test: валидационная выборка для итоговой оценки.
-        is_scale: передаётся в :func:`preprocessor`.
-        is_cat: передаётся в :func:`preprocessor`.
-        logger: объект с методом ``log_experiment`` / ``log_pipeline``.
+        cfg: конфигурация Hydra с настройками эксперимента.
+        model_cfg: часть конфига, относящаяся к модели (scaler/encoder и т.д.).
+        methods: словарь метрик для финальной оценки и логирования.
+        is_scale, is_cat: флаги предобработки.
+        cat_features: список категориальных признаков для CatBoost (опционально).
+        X_submit: таблица для предсказаний (опционально).
+        logger: объект логгера с методами `log_experiment` и `log_pipeline`.
 
-    Returns:
-        Обученный ``GridSearchCV`` с лучшим estimator'ом в ``best_estimator_``.
+    Возвращает:
+        Объект `GridSearchCV` с уже обученным `best_estimator_`.
     """
 
     ensure_dirs(cfg)
@@ -185,20 +190,28 @@ def optuna_tuning(
     X_submit: pd.DataFrame | None = None,
     logger: Any = None,
 ) -> optuna.Study:
-    """Оптимизация гиперпараметров через Optuna с 5-fold CV внутри objective.
+    """Оптимизация гиперпараметров с помощью Optuna.
 
-    Args:
+    Функция создаёт `optuna.Study`, внутри `objective` клонирует базовую модель,
+    строит пайплайн с предобработкой и вычисляет среднюю метрику CV.
+
+    Аргументы:
         model: базовый sklearn-классификатор (клонируется для каждого trial).
-        params_fn: функция ``(trial) -> dict`` с пространством поиска.
-        X_train, y_train: обучающая выборка.
-        X_test, y_test: выборка для финальной оценки лучшей модели.
-        direction: ``"maximize"`` или ``"minimize"``.
-        n_trials: число испытаний Optuna.
+        params_fn: функция `trial -> dict` возвращающая параметры для модели.
+        X_train, y_train: обучающая выборка для CV.
+        X_test, y_test: отложенная выборка для финальной оценки лучшей модели.
+        cfg: глобальная конфигурация эксперимента.
+        model_cfg: конфигурация модели (scaler/encoder и др.).
+        methods: словарь метрик для финальной оценки и логирования.
+        n_trials: число проб Optuna.
         is_scale, is_cat: флаги предобработки.
-        logger: объект с методом ``log_experiment`` / ``log_pipeline``.
+        cat_features: список категориальных признаков для передачи в `fit`.
+        X_submit: тестовая таблица для сохранения предсказаний (опционально).
+        logger: объект логгера с методами `log_experiment` и `log_pipeline`.
 
-    Returns:
-        Завершённый ``optuna.Study`` с атрибутами ``best_params`` и ``best_value``.
+    Возвращает:
+        `optuna.Study` после завершения оптимизации. Лучшие параметры доступны
+        в `study.best_params`, лучшая метрика — в `study.best_value`.
     """
 
     ensure_dirs(cfg)

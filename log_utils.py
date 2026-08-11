@@ -67,7 +67,7 @@ class WandbLogger:
 
 def add_result(
     output: dict[str, Any],
-    results: list[dict[str]] | list[dict[Any]] | None = None,
+    results: list[dict[str, Any]] | None = None,
     log_file_path: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -117,5 +117,11 @@ def add_result(
 
 
 def _log(message: str, console: bool) -> None:
+    """Prints a message to stdout when `console` is True.
+
+    Args:
+        message: Message string to print.
+        console: Whether to print to stdout.
+    """
     if console:
         print(message)

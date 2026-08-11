@@ -1,4 +1,3 @@
-from log_utils import add_result
 from typing import Any
 
 import joblib
@@ -9,6 +8,7 @@ from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.pipeline import Pipeline
 
+from log_utils import add_result
 from preprocessing import build_preprocessor
 from utils import pipeline_return
 

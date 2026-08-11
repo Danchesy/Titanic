@@ -10,14 +10,24 @@ __all__ = [
     "update_readme_leaderboard",
 ]
 
+
 def load_leaderboard(log_file_path: str) -> pd.DataFrame:
     """Читает jsonl файл и строит таблицу лучших результатов по каждой модели."""
     records = [json.loads(line) for line in open(log_file_path, encoding="utf-8")]
     df = pd.DataFrame(records)
     return df
 
+
 def build_leaderboard_table(df: pd.DataFrame, metric: str = "accuracy") -> pd.DataFrame:
-    """Создание таблицы для README."""
+    """Создает таблицу лидеров, выбирая лучшую запись для каждой модели по указанной метрике.
+    
+    Args:
+        df: DataFrame with experiment records. Must contain a "model" column.
+        metric: Metric column to sort by (default: "accuracy").
+
+    Returns:
+        pd.DataFrame: Aggregated leaderboard with selected columns.
+    """
     best = (
         df.sort_values(metric, ascending=False)
         .groupby("model", as_index=False)
@@ -27,12 +37,26 @@ def build_leaderboard_table(df: pd.DataFrame, metric: str = "accuracy") -> pd.Da
     )
     return best
 
+
 def leaderboard_to_markdown(df: pd.DataFrame) -> str:
+    """Конвертирует DataFrame с результатами в Markdown таблицу для вставки в README.md.
+
+    Args:
+        df: Leaderboard DataFrame.
+
+    Returns:
+        str: Markdown representation of the table.
+    """
     return df.to_markdown(index=False)
 
 
 def update_readme_leaderboard(readme_path: str, leaderboard_md: str) -> None:
-    """Находит теги в README и заменяет текст между ними на актуальную таблицу."""
+    """Находит теги в README и заменяет текст между ними на актуальную таблицу.
+        
+        Args:
+            readme_path: Path to the README file to update.
+            leaderboard_md: Markdown string to insert between the markers.
+    """
     with open(readme_path, "r", encoding="utf-8", errors="replace") as f:
         content = f.read()
 

@@ -3,7 +3,7 @@ import random
 import time
 from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Dict
 
 import joblib
 import matplotlib.pyplot as plt
@@ -32,7 +32,10 @@ __all__ = [
 ]
 
 def set_seed(seed: int = 42) -> None:
-    """Фиксирует seed для всех используемых библиотек (Python, NumPy, PyTorch)."""
+    """Фиксирует seed для всех используемых библиотек (Python, NumPy, PyTorch).
+    
+        Args:
+            seed: Integer seed to set for Python `random`, NumPy and PyTorch."""
     random.seed(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
     np.random.seed(seed)
@@ -47,7 +50,14 @@ def set_seed(seed: int = 42) -> None:
 def data_loading(
     cfg: DictConfig,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.DataFrame]:
-    """Загружает и разделяет данные."""
+    """Загружает и разделяет датасет на обучающую и валидационную выборки.
+
+    Args:
+        cfg: Hydra `DictConfig` with dataset paths and split parameters.
+
+    Returns:
+        Tuple of `(X_train, X_val, y_train, y_val, test)`.
+    """
     train = pd.read_csv(cfg.data.train_path)
     test = pd.read_csv(cfg.data.test_path)
 
@@ -113,7 +123,13 @@ def save_submission(
     X_submit: pd.DataFrame,
     submission_path: str,
 ) -> None:
-    """Сохраняет предсказания в CSV для Kaggle."""
+    """Сохраняет предсказания модели в формате CSV для сабмита на Kaggle.
+
+    Args:
+        pipeline: Trained sklearn `Pipeline` or estimator with `predict`.
+        X_submit: Test DataFrame indexed by `PassengerId`.
+        submission_path: Destination CSV path for the submission.
+    """
     os.makedirs(os.path.dirname(submission_path) or ".", exist_ok=True)
     preds = pipeline.predict(X_submit)
     submission = pd.DataFrame(
@@ -174,7 +190,15 @@ def generate_submission(
     pipeline_path: str | None = None,
     output_path: str | None = None,
 ) -> None:
-    """Генерирует файл сабмита из сохранённого пайплайна."""
+    """Генерирует файл сабмита из сохранённого пайплайна.
+    
+        Args:
+            cfg: Hydra config with paths.
+            pipeline_path: Optional path to a saved pipeline; falls back to
+                `{cfg.data.models_dir}/full_pipeline.pkl`.
+            output_path: Optional output path; falls back to
+                `{cfg.data.results_dir}/submission.csv`.
+    """
     pipeline_path = pipeline_path or f"{cfg.data.models_dir}/full_pipeline.pkl"
     output_path = output_path or os.path.join(cfg.data.results_dir, "submission.csv")
 
@@ -183,6 +207,11 @@ def generate_submission(
     save_submission(pipeline, test, output_path)
 
 def ensure_dirs(cfg: DictConfig) -> None:
+    """Проверяет существование директорий для моделей и результатов, создаёт их при необходимости.
+
+    Args:
+        cfg: Hydra config containing `data.models_dir` and `data.results_dir`.
+    """
     os.makedirs(cfg.data.models_dir, exist_ok=True)
     os.makedirs(cfg.data.results_dir, exist_ok=True)
     # os.makedirs(cfg.data.reports_dir, exist_ok=True)
@@ -203,11 +232,19 @@ def model_filename(
     return (models_dir / filename).as_posix()
 
 
-def time_and_score(stage='train'):
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
+def time_and_score(stage: str = 'train') -> Callable[[Callable[..., Any]], Callable[..., Dict[str, Any]]]:
+    """Декоратор для вычисления времени выполнения функции и возврата результата вместе с информацией о времени.
 
+    Функция декоратора возвращает словарь с результатом и временем выполнения
+    Args:
+        stage: Stage name to use in the timing key (e.g. 'train' or 'predict').
+
+    Returns:
+        A decorator for timing functions.
+    """
+    def decorator(func: Callable[..., Any]) -> Callable[..., dict[str, Any]]:
+        @wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
             final_stage = kwargs.pop('stage', stage)
 
             start_train = time.time()
@@ -216,20 +253,50 @@ def time_and_score(stage='train'):
 
             return {
                 "result": result,
-                f"{final_stage}_time_sec": timer
+                f"{final_stage}_time_sec": timer,
             }
+
         return wrapper
+
     return decorator
 
 
 @time_and_score(stage='predict')
 def holdout_score(pipeline: Pipeline, X: pd.DataFrame, y: pd.Series, metric: str) -> float:
+    """Вычисляет метрику на отложенной выборке с использованием sklearn scorers.
+
+
+    Note: эта функция обёрнута в `time_and_score`, поэтому возвращаемое
+    значение будет словарём с ключами "result" и f"{stage}_time_sec".
+
+    Args:
+        pipeline: Trained estimator or pipeline implementing `predict`/`predict_proba`.
+        X: Feature DataFrame for evaluation.
+        y: True labels.
+        metric: Metric name compatible with `sklearn.metrics.get_scorer`.
+
+    Returns:
+        float: значение метрики, вычисленное с помощью scorer.
+    """
     scorer = get_scorer(metric)
     return float(scorer(pipeline, X, y))
 
 
 @time_and_score()
-def run_method(obj, method_name, *args, **kwargs):
+def run_method(obj: Any, method_name: str, *args: Any, **kwargs: Any) -> Any:
+    """Вызывает метод по имени на объекте (или глобальную функцию) и возвращает результат.
+
+    Note: декорирована `time_and_score`, поэтому вызывающий получит метаданные о времени.
+
+    Args:
+        obj: Object containing the method, or `None` to call a global function.
+        method_name: Name of the method or function to call.
+        *args: Positional args forwarded to the method.
+        **kwargs: Keyword args forwarded to the method.
+
+    Returns:
+        Any: Результат вызванного метода.
+    """
     method = getattr(obj, method_name) if obj is not None else globals()[method_name]
     res = method(*args, **kwargs)
 
