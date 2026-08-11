@@ -21,6 +21,8 @@ is_cat: ${preprocessing.encode_categorical}
 
 is_scale: ${preprocessing.scale_numeric}
 
+calibration_method: ${tuning.calibration.method}
+
 grid_params:
   model__n_neighbors: [3, 5, 7, 9, 11, 13, 15, 17]
   model__weights: ["distance", "uniform"]

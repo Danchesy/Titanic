@@ -1,6 +1,6 @@
 enabled: true
 
-n_trials: 50
+n_trials: 20
 
 timeout: null
 
@@ -11,6 +11,10 @@ metric: accuracy
 use_optuna: true
 
 use_grid_search: false
+
+calibration:
+  method: sigmoid
+  n_bins: 10
 
 metrics:
   accuracy:

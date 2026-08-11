@@ -36,7 +36,7 @@
 - **9 моделей** (от логистической регрессии до нейросети на PyTorch) обучаются и сравниваются в `main.py`;
 - гиперпараметры подбираются через **Optuna** (байесовская оптимизация) или **GridSearchCV**;
 - лучшие модели автоматически комбинируются в **Voting/Stacking-ансамбли**;
-- результаты каждого запуска пишутся в `results/experiments.jsonl`, а таблица лидеров **автоматически подставляется в этот README** между тегами `<!-- leaderboard_start -->` / `<!-- leaderboard_end -->`.
+- результаты каждого запуска пишутся в `results/experiments.jsonl`, а таблица лидеров **автоматически подставляется в этот README**
 
 **Ключевые задачи проекта:**
 
@@ -94,6 +94,7 @@ Titanic/
 │   └── gender_submission.csv       # Пример сабмита Kaggle
 ├── eda.ipynb                       # Разведочный анализ данных
 ├── preprocessing.py                # FeatureEngineer + сборка preprocessing-пайплайна
+├── calibration.py                  # Калибровка + оценка качества колибровки модели
 ├── main.py                         # Точка входа: цикл по всем моделям из конфига
 ├── tuning_params.py                # GridSearchCV/Optuna обёртки + search space моделей
 ├── ensembles.py                    # Voting/Stacking поверх лучших сохранённых пайплайнов
@@ -301,15 +302,15 @@ python main.py logging.wandb.enabled=true logging.wandb.project=titanic logging.
 <!-- leaderboard_start -->
 | model                        |   accuracy |   f1_score |   tuning_time_sec |   latency_ms_per_sample |
 |:-----------------------------|-----------:|-----------:|------------------:|------------------------:|
-| LogisticRegression           |   0.832402 |   0.765625 |          13.9     |                0.1217   |
+| LogisticRegression           |   0.849162 |   0.793893 |           0.81    |                0.2663   |
+| KNeighborsClassifier         |   0.832402 |   0.761905 |           0.59    |                0.3515   |
+| PreTrainedStackingClassifier |   0.832402 |   0.761905 |           0.13    |                0.560986 |
 | LGBMClassifier               |   0.826816 |   0.739496 |          19.46    |                0.0873   |
-| KNeighborsClassifier         |   0.821229 |   0.741935 |          13.46    |                0.1256   |
-| PreTrainedStackingClassifier |   0.821229 |   0.737705 |           0.11    |                0.279325 |
-| XGBClassifier                |   0.815642 |   0.717949 |          32.44    |                0.0873   |
-| PreTrainedVotingClassifier   |   0.810056 |   0.711864 |           0       |                0.28491  |
+| XGBClassifier                |   0.815642 |   0.722689 |           1.51    |                0.3197   |
+| CatBoostClassifier           |   0.810056 |   0.742424 |          29.26    |                0.1479   |
 | RandomForestClassifier       |   0.810056 |   0.716667 |         181.45    |                0.2103   |
+| PreTrainedVotingClassifier   |   0.810056 |   0.711864 |           0       |                0.28491  |
 | NN_Model                     |   0.810056 |   0.730159 |           3.40888 |                0.162009 |
-| CatBoostClassifier           |   0.793296 |   0.699187 |         998.27    |                0.1286   |
 | DecisionTreeClassifier       |   0.782123 |   0.666667 |           7.66    |                0.0817   |
 <!-- leaderboard_end -->
 

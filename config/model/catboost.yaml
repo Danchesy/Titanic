@@ -26,6 +26,8 @@ is_cat: false
 
 is_scale: false
 
+calibration_method: ${tuning.calibration.method}
+
 grid_params:
   model__iterations: [100, 150, 200]
   model__learning_rate: [0.01, 0.05, 0.1]

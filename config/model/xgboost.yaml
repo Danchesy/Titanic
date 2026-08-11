@@ -17,6 +17,8 @@ is_cat: true
 
 is_scale: false
 
+calibration_method: ${tuning.calibration.method}
+
 grid_params:
   model__max_depth: [3, 4, 5]
   model__n_estimators: [100, 150, 200]

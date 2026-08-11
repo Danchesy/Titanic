@@ -12,6 +12,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
+from calibration import calibration_metrics
 from log_utils import _log
 from preprocessing import build_preprocessor
 from utils import model_filename, run_method
@@ -190,6 +191,7 @@ def nn_eval(
     X_val_name_tensor: torch.Tensor,
     y_val: torch.Tensor,
     methods: dict[str, Any],
+    n_bins: int = 10,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """Валидирует модель на отложенной выборке и вычисляет метрики.
 
@@ -214,6 +216,11 @@ def nn_eval(
                 metric_score = metric_score.item()
 
             metric_to_score[name] = float(metric_score)
+
+        y_prob = val_outputs.squeeze().cpu().numpy()
+        metric_to_score.update(
+            calibration_metrics(y_val.cpu().numpy(), y_prob, n_bins=n_bins)
+        )
 
     return val_loss, metric_to_score
 
@@ -291,6 +298,7 @@ def nn_train_pipeline(
             X_val_name_tensor=X_val_name_tensor,
             y_val=y_val_tensor,
             methods=OmegaConf.to_container(cfg.model.nn_model.metrics, resolve=True),
+            n_bins=cfg.tuning.calibration.get("n_bins", 10),
         )
 
         if val_loss.item() < best_loss - cfg.model.nn_model.min_delta:
@@ -378,6 +386,8 @@ def add_nn_res(
         "f1_score": metric_to_score.get("f1_score", None),
         "precision": metric_to_score.get("precision", None),
         "recall": metric_to_score.get("recall", None),
+        "brier_score": metric_to_score.get("brier_score", None),
+        "ece": metric_to_score.get("ece", None),
         "loss": loss,
         "params": OmegaConf.to_container(model_cfg, resolve=True),
         "tuning_time_sec": tuning_time_sec,
@@ -440,6 +450,7 @@ def nn_model(
         X_val_name_tensor=X_val_name_tensor,
         y_val=y_val_tensor,
         methods=OmegaConf.to_container(cfg.model.nn_model.metrics, resolve=True),
+        n_bins=cfg.tuning.calibration.get("n_bins", 10),
     )
 
     val_loss, metrics = eval_output["result"]

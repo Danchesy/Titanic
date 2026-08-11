@@ -15,6 +15,8 @@ is_cat: ${preprocessing.encode_categorical}
 
 is_scale: false
 
+calibration_method: ${tuning.calibration.method}
+
 grid_params:
   model__max_depth: [3, 5, 7]
   model__min_samples_split: [5, 20]

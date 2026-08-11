@@ -1,6 +1,6 @@
 import os
 from collections.abc import Callable
-from typing import Any, Callable, Dict, Optional, List
+from typing import Any
 
 import hydra
 import joblib
@@ -11,6 +11,7 @@ from sklearn.base import clone
 from sklearn.model_selection import GridSearchCV, cross_val_score
 from sklearn.pipeline import Pipeline
 
+from calibration import calibrate_pipeline, evaluate_calibration
 from log_utils import _log, add_result
 from preprocessing import build_preprocessor, pipeline_fit_params
 from utils import (
@@ -114,6 +115,20 @@ def grid_tuning(
 
     best_pipeline = grid_search.best_estimator_
 
+    calibration_method = model_cfg.get("calibration_method", None)
+    best_pipeline = calibrate_pipeline(
+        best_pipeline, X_test, y_test, method=calibration_method, console=console
+    )
+
+    n_bins = cfg.tuning.calibration.get("n_bins", 10)
+    cal_scores = evaluate_calibration(
+        best_pipeline, X_test, y_test, n_bins=n_bins
+    ) or {}
+
+    if hasattr(best_pipeline, "estimator"):
+        # Если это CalibratedClassifierCV, берем оригинальный пайплайн из .estimator
+        best_pipeline = best_pipeline.estimator
+
     pred_output = holdout_score(
         pipeline=best_pipeline, X=X_test, y=y_test, metric=metric
     )
@@ -137,6 +152,10 @@ def grid_tuning(
         score = metric_fn(y_test, y_pred_holdout)
         metric_to_score[name] = float(score)
 
+        _log(f"Holdout {name}: {score:.4f}", console)
+
+    metric_to_score.update(cal_scores)
+    for name, score in cal_scores.items():
         _log(f"Holdout {name}: {score:.4f}", console)
 
     res = pipeline_return(
@@ -293,6 +312,20 @@ def optuna_tuning(
         **pipeline_fit_params(cat_features),
     )
 
+    calibration_method = model_cfg.get("calibration_method", None)
+    final_pipeline = calibrate_pipeline(
+        final_pipeline, X_test, y_test, method=calibration_method, console=console
+    )
+
+    n_bins = cfg.tuning.calibration.get("n_bins", 10)
+    cal_scores = evaluate_calibration(
+        final_pipeline, X_test, y_test, n_bins=n_bins
+    ) or {}
+
+    if hasattr(final_pipeline, "estimator"):
+        # Если это CalibratedClassifierCV, берем оригинальный пайплайн из .estimator
+        final_pipeline = final_pipeline.estimator
+
     pred_output = holdout_score(final_pipeline, X_test, y_test, metric)
 
     _log(f"Holdout {metric}: {pred_output['result']:.4f}", console)
@@ -311,6 +344,10 @@ def optuna_tuning(
         score = metric_fn(y_test, y_pred_holdout)
         metric_to_score[name] = float(score)
 
+        _log(f"Holdout {name}: {score:.4f}", console)
+
+    metric_to_score.update(cal_scores)
+    for name, score in cal_scores.items():
         _log(f"Holdout {name}: {score:.4f}", console)
 
     res = pipeline_return(

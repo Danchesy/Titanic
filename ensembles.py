@@ -9,6 +9,7 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 
+from calibration import evaluate_calibration
 from log_utils import _log, add_result
 from readme_leaderboard import load_leaderboard
 from utils import (
@@ -50,6 +51,11 @@ class PreTrainedStackingClassifier:
         """Predict labels using the trained final estimator on meta features."""
         X_meta = self._get_meta_features(X)
         return self.final_estimator.predict(X_meta)
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        """Return class probabilities from the meta-model."""
+        X_meta = self._get_meta_features(X)
+        return self.final_estimator.predict_proba(X_meta)
 
     def score(self, X: pd.DataFrame, y: pd.Series) -> float:
         """Compute accuracy of the stacked model on (X, y)."""
@@ -156,6 +162,8 @@ def ensemble_return(
         "f1_score": metric_to_score.get("f1_score", None),
         "precision": metric_to_score.get("precision", None),
         "recall": metric_to_score.get("recall", None),
+        "brier_score": metric_to_score.get("brier_score", None),
+        "ece": metric_to_score.get("ece", None),
         "params": model.get_params(),
         "path": path,
     }
@@ -213,6 +221,8 @@ def make_ensembles(
             y=y_train,
         )
 
+        _log("Calibration skipped for ensemble", console)
+
         pred_output = holdout_score(model, X_val, y_val, metric=cfg.tuning.metric)
 
         _log(f"Holdout {cfg.tuning.metric}: {pred_output['result']:.4f}", console)
@@ -228,6 +238,12 @@ def make_ensembles(
             metric_fn = hydra.utils.instantiate(metric_cfg)
             score = metric_fn(y_val, y_pred_holdout)
             metric_to_score[name] = float(score)
+            _log(f"Holdout {name}: {score:.4f}", console)
+
+        n_bins = cfg.tuning.calibration.get("n_bins", 10)
+        cal_scores = evaluate_calibration(model, X_val, y_val, n_bins=n_bins) or {}
+        metric_to_score.update(cal_scores)
+        for name, score in cal_scores.items():
             _log(f"Holdout {name}: {score:.4f}", console)
 
         model_name = model.__class__.__name__

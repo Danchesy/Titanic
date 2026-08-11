@@ -33,6 +33,7 @@ META_KEYS = {
     "Cs",
     "scaler",
     "encoder",
+    "calibration_method",
 }
 
 

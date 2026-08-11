@@ -96,6 +96,10 @@ def add_result(
         "f1_score": float(output.get("f1_score")),
         "precision": float(output.get("precision")),
         "recall": float(output.get("recall")),
+        "brier_score": (
+            float(output["brier_score"]) if output.get("brier_score") is not None else None
+        ),
+        "ece": float(output["ece"]) if output.get("ece") is not None else None,
         "std": float(output.get("std_score", 0.0)),
         "params": {str(k): str(v) for k, v in raw_params.items()},
         "tuning_time_sec": output.get("tuning_time_sec"),
