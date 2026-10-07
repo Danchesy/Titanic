@@ -388,6 +388,7 @@ def add_nn_res(
         "recall": metric_to_score.get("recall", None),
         "brier_score": metric_to_score.get("brier_score", None),
         "ece": metric_to_score.get("ece", None),
+        "cv_score": None,
         "loss": loss,
         "params": OmegaConf.to_container(model_cfg, resolve=True),
         "tuning_time_sec": tuning_time_sec,

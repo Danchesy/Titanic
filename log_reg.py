@@ -64,6 +64,7 @@ def logistic_kfold(
         random_state=random_state,
         max_iter=max_iter,
         verbose=verbose,
+        n_jobs=training.n_jobs,
     )
 
     pipeline = Pipeline(
@@ -81,7 +82,14 @@ def logistic_kfold(
         ]
     )
 
-    scores = cross_val_score(pipeline, X_train, y_train, cv=skf, scoring=scoring)
+    scores = cross_val_score(
+        pipeline,
+        X_train,
+        y_train,
+        cv=skf,
+        scoring=scoring,
+        n_jobs=training.n_jobs,
+    )
 
     if cfg.logging.console:
         for fold, acc in enumerate(scores, start=1):
@@ -158,6 +166,7 @@ def log_reg_cv(
         Cs=params.get("Cs", 10),
         verbose=params.verbose,
         scoring=params.get("scoring", "accuracy"),
+        n_jobs=training.n_jobs,
     )
 
     pipeline_cv = Pipeline(
@@ -187,12 +196,14 @@ def log_reg_cv(
     label = next(iter(scores.keys()))
     mean_cv_per_c = np.mean(scores[label], axis=0)
     best_cv_score = np.max(mean_cv_per_c).item()
+    best_c_idx = np.flatnonzero(np.isclose(best_model.Cs_, best_C))[0]
+    cv_scores = scores[label][:, best_c_idx]
 
     print(f"best C: {best_C}")
     print(f"mean acc for best C: {best_cv_score}")
     print(f"test accuracy: {test_acc}")
 
-    res = pipeline_return(pipeline_cv, best_cv_score)
+    res = pipeline_return(pipeline_cv, cv_scores)
     experiment = add_result(res)
 
     if logger is not None:

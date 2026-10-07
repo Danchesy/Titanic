@@ -92,14 +92,17 @@ def add_result(
 
     experiment_data = {
         "model": model_name,
-        "accuracy": float(output.get("accuracy")),
-        "f1_score": float(output.get("f1_score")),
-        "precision": float(output.get("precision")),
-        "recall": float(output.get("recall")),
+        "accuracy": float(output["accuracy"]) if output.get("accuracy") is not None else None,
+        "f1_score": float(output["f1_score"]) if output.get("f1_score") is not None else None,
+        "precision": float(output["precision"]) if output.get("precision") is not None else None,
+        "recall": float(output["recall"]) if output.get("recall") is not None else None,
         "brier_score": (
             float(output["brier_score"]) if output.get("brier_score") is not None else None
         ),
         "ece": float(output["ece"]) if output.get("ece") is not None else None,
+        "cv_score": (
+            float(output["mean_score"]) if output.get("mean_score") is not None else None
+        ),
         "std": float(output.get("std_score", 0.0)),
         "params": {str(k): str(v) for k, v in raw_params.items()},
         "tuning_time_sec": output.get("tuning_time_sec"),

@@ -19,6 +19,8 @@ fit_intercept: true
 
 max_iter: 1000
 
+n_jobs: ${training.n_jobs}
+
 verbose: 0
 
 scoring: accuracy

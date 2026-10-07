@@ -1,3 +1,4 @@
+import inspect
 import os
 from pathlib import Path
 from typing import Any
@@ -6,6 +7,8 @@ import hydra
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.base import clone
+from sklearn.ensemble import StackingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 
@@ -20,55 +23,28 @@ from utils import (
     submission_output_path,
 )
 
+PROJECT_ROOT = Path(__file__).resolve().parent
 
-class PreTrainedStackingClassifier:
-    """Мета-модель стекинга, которая объединяет предсказания от заранее обученных пайплайнов.
-    
-    Args:
-        estimators: List of tuples `(name, pipeline)` where each pipeline implements `predict_proba`.
-        final_estimator: Estimator to train on meta-features produced by base estimators.
-    """
 
-    def __init__(self, estimators: list[tuple[str, Any]], final_estimator: Any) -> None:
-        self.estimators: list[tuple[str, Any]] = estimators
-        self.final_estimator: Any = final_estimator
+def _resolve_pipeline_path(path_value: str | os.PathLike[str] | None) -> Path | None:
+    """Resolve saved model paths from the project root or current working directory."""
+    if path_value is None:
+        return None
 
-    def _get_meta_features(self, X: pd.DataFrame) -> np.ndarray:
-        """Create meta-features by collecting positive-class probabilities from each estimator."""
-        meta_features: list[np.ndarray] = []
-        for name, pipe in self.estimators:
-            preds = pipe.predict_proba(X)[:, 1]
-            meta_features.append(preds)
-        return np.column_stack(meta_features)
+    raw_path = Path(str(path_value))
+    if raw_path.is_absolute():
+        return raw_path if raw_path.exists() else None
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> "PreTrainedStackingClassifier":
-        """Fit the final estimator on meta features extracted from X."""
-        X_meta = self._get_meta_features(X)
-        self.final_estimator.fit(X_meta, y)
-        return self
+    for candidate in (raw_path, PROJECT_ROOT / raw_path, Path.cwd() / raw_path):
+        if candidate.exists():
+            return candidate.resolve()
 
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
-        """Predict labels using the trained final estimator on meta features."""
-        X_meta = self._get_meta_features(X)
-        return self.final_estimator.predict(X_meta)
+    for base_dir in (PROJECT_ROOT / "models", Path.cwd() / "models"):
+        candidate = base_dir / raw_path.name
+        if candidate.exists():
+            return candidate.resolve()
 
-    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
-        """Return class probabilities from the meta-model."""
-        X_meta = self._get_meta_features(X)
-        return self.final_estimator.predict_proba(X_meta)
-
-    def score(self, X: pd.DataFrame, y: pd.Series) -> float:
-        """Compute accuracy of the stacked model on (X, y)."""
-        from sklearn.metrics import accuracy_score
-
-        return float(accuracy_score(y, self.predict(X)))
-
-    def get_params(self, deep: bool = True) -> dict[str, Any]:
-        """Return simple params for logging compatibility."""
-        return {
-            "estimators_count": len(self.estimators),
-            "estimators_names": [name for name, _ in self.estimators],
-        }
+    return None
 
 
 class PreTrainedVotingClassifier:
@@ -102,13 +78,31 @@ class PreTrainedVotingClassifier:
         }
 
 
-def load_stacking_pipeline(leaderboard: pd.DataFrame, top_k: int | None = None) -> PreTrainedStackingClassifier:
+def load_stacking_pipeline(
+    leaderboard: pd.DataFrame,
+    top_k: int | None = None,
+    cv: int = 5,
+    n_jobs: int | None = None,
+    cat_features: list[str] | None = None,
+) -> StackingClassifier:
     pipelines = load_pipelines(leaderboard, top_k)
-    estimators = list(pipelines.items())
-    
-    return PreTrainedStackingClassifier(
+    estimators = []
+    for name, fitted_pipeline in pipelines.items():
+        estimator = clone(fitted_pipeline)
+        model = estimator.named_steps.get("model")
+        if (
+            model is not None
+            and cat_features
+            and "cat_features" in inspect.signature(model.fit).parameters
+        ):
+            estimator.set_params(model__cat_features=tuple(cat_features))
+        estimators.append((name, estimator))
+
+    return StackingClassifier(
         estimators=estimators,
-        final_estimator=LogisticRegression(max_iter=1000, random_state=42)
+        final_estimator=LogisticRegression(max_iter=1000, random_state=42),
+        cv=cv,
+        n_jobs=n_jobs,
     )
 
 
@@ -120,19 +114,45 @@ def load_voting_pipeline(leaderboard: pd.DataFrame, top_k: int | None = None) ->
 
 
 def load_pipelines(leaderboard: pd.DataFrame, top_k: int | None = None) -> dict[str, Any]:
-    best_models = (
-        leaderboard.sort_values(by="accuracy", ascending=False)
-            .groupby("model", as_index=False)
-            .first()
+    ensemble_models = {
+        "PreTrainedStackingClassifier",
+        "StackingClassifier",
+        "PreTrainedVotingClassifier",
+    }
+    is_ensemble = leaderboard["model"].isin(ensemble_models) | leaderboard[
+        "path"
+    ].astype(str).str.contains("_ensemble_", regex=False)
+    is_joblib_artifact = leaderboard["path"].map(
+        lambda path: Path(str(path)).suffix.lower() in {".pkl", ".joblib"}
     )
+    best_models = (
+        leaderboard.loc[~is_ensemble & is_joblib_artifact]
+        .dropna(subset=["accuracy", "path"])
+        .sort_values(by="accuracy", ascending=False)
+        .groupby("model", as_index=False)
+        .first()
+    )
+
+    if best_models.empty:
+        raise FileNotFoundError(
+            "No compatible saved model artifacts are available for building an ensemble."
+        )
 
     if top_k is not None:
         best_models = best_models.head(top_k)
 
-    pipeline_paths = [Path(path) for path in best_models['path'].to_list()]
-    pipeline_names = best_models['model'].to_list()
+    pipelines = {}
+    for _, row in best_models.iterrows():
+        resolved_path = _resolve_pipeline_path(row["path"])
+        if resolved_path is not None:
+            pipelines[row["model"]] = joblib.load(resolved_path)
 
-    return {name: joblib.load(path) for path, name in zip(pipeline_paths, pipeline_names)}
+    if not pipelines:
+        raise FileNotFoundError(
+            "No saved model artifacts were found for the ensemble leaderboard entries."
+        )
+
+    return pipelines
 
 
 def ensemble_return(
@@ -156,6 +176,15 @@ def ensemble_return(
     Returns:
         Dict[str, Any]: Experiment result record.
     """
+    if isinstance(model, StackingClassifier):
+        params = {
+            "cv": model.cv,
+            "estimators": [name for name, _ in model.estimators],
+            "final_estimator": type(model.final_estimator).__name__,
+        }
+    else:
+        params = model.get_params()
+
     result = {
         "model": model,
         "accuracy": metric_to_score.get("accuracy", None),
@@ -164,7 +193,7 @@ def ensemble_return(
         "recall": metric_to_score.get("recall", None),
         "brier_score": metric_to_score.get("brier_score", None),
         "ece": metric_to_score.get("ece", None),
-        "params": model.get_params(),
+        "params": params,
         "path": path,
     }
 
@@ -200,16 +229,16 @@ def make_ensembles(
 
     leaderboard_df = load_leaderboard(log_file_path)
 
-    ensemble_configs = []
     for ens_cfg in cfg.model.ensemble.list:
-        ensemble_configs.append({
-            "suffix": ens_cfg.suffix,
-            "factory": lambda ec=ens_cfg: hydra.utils.instantiate(ec.factory, leaderboard=leaderboard_df)
-        })
-
-    for ens in ensemble_configs:
-        suffix = ens["suffix"]
-        model = ens["factory"]()
+        suffix = ens_cfg.suffix
+        factory_kwargs: dict[str, Any] = {"leaderboard": leaderboard_df}
+        if suffix == "stacking":
+            factory_kwargs.update(
+                cv=cfg.training.cv_folds,
+                n_jobs=cfg.training.n_jobs,
+                cat_features=list(cfg.model.catboost.cat_features),
+            )
+        model = hydra.utils.instantiate(ens_cfg.factory, **factory_kwargs)
         
         _log(f"\n {model.__class__.__name__}", console)
 

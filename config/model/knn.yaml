@@ -13,6 +13,8 @@ algorithm: auto
 
 leaf_size: 30
 
+n_jobs: ${training.n_jobs}
+
 p: 2
 
 metric: minkowski
