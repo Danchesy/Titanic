@@ -131,10 +131,6 @@ def grid_tuning(
         best_pipeline, X_test, y_test, n_bins=n_bins
     ) or {}
 
-    if hasattr(best_pipeline, "estimator"):
-        # Если это CalibratedClassifierCV, берем оригинальный пайплайн из .estimator
-        best_pipeline = best_pipeline.estimator
-
     pred_output = holdout_score(
         pipeline=best_pipeline, X=X_test, y=y_test, metric=metric
     )
@@ -163,6 +159,10 @@ def grid_tuning(
     metric_to_score.update(cal_scores)
     for name, score in cal_scores.items():
         _log(f"Holdout {name}: {score:.4f}", console)
+
+    if hasattr(best_pipeline, "estimator"):
+        # Если это CalibratedClassifierCV, берем оригинальный пайплайн из .estimator
+        best_pipeline = best_pipeline.estimator
 
     res = pipeline_return(
         best_pipeline,
@@ -340,10 +340,6 @@ def optuna_tuning(
         final_pipeline, X_test, y_test, n_bins=n_bins
     ) or {}
 
-    if hasattr(final_pipeline, "estimator"):
-        # Если это CalibratedClassifierCV, берем оригинальный пайплайн из .estimator
-        final_pipeline = final_pipeline.estimator
-
     pred_output = holdout_score(final_pipeline, X_test, y_test, metric)
 
     _log(f"Holdout {metric}: {pred_output['result']:.4f}", console)
@@ -368,6 +364,10 @@ def optuna_tuning(
     for name, score in cal_scores.items():
         _log(f"Holdout {name}: {score:.4f}", console)
 
+    if hasattr(final_pipeline, "estimator"):
+        # Если это CalibratedClassifierCV, берем оригинальный пайплайн из .estimator
+        final_pipeline = final_pipeline.estimator
+    
     res = pipeline_return(
         final_pipeline,
         cv_scores,
